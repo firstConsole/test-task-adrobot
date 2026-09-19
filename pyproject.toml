@@ -1,0 +1,20 @@
+[project]
+name = "test-task-adrobot"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "firstConsole",email = "artamonov008@yandex.ru"}
+]
+readme = "README.md"
+requires-python = ">=3.13"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+fastapi = "^0.141.1"
+
+[tool.poetry]
+packages = [{include = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
