@@ -1,20 +1,45 @@
 [project]
-name = "test-task-adrobot"
+name = "adrobot"
 version = "0.1.0"
-description = ""
-authors = [
-    {name = "firstConsole",email = "artamonov008@yandex.ru"}
+description = "FastAPI service over the Keitaro tracker Admin API: creates campaigns and redistributes offer shares inside a stream."
+authors = [{ name = "firstConsole", email = "artamonov008@yandex.ru" }]
+# One interpreter on purpose: this is a service, not a library. The same 3.13 is
+# pinned in the Docker base image and in mypy's python_version.
+requires-python = ">=3.13,<3.14"
+# Floors are the versions resolved and tested today; ceilings are the next release
+# each project's own policy allows to break.
+dependencies = [
+    "alembic>=1.20.0,<2",
+    "asyncpg>=0.31.0,<0.32",
+    "fastapi>=0.141.1,<0.142",
+    "httpx>=0.28.1,<0.29",
+    "pydantic>=2.13.5,<3",
+    "pydantic-settings>=2.15.0,<3",
+    # The asyncio extra is not redundant: without it greenlet carries a platform
+    # marker that excludes darwin/arm64, and the first async query raises MissingGreenlet.
+    "sqlalchemy[asyncio]>=2.0.54,<2.1",
+    "structlog>=26.1.0,<27",
+    "uvicorn>=0.53.0,<0.54",
 ]
-readme = "README.md"
-requires-python = ">=3.13"
 
-[tool.poetry.dependencies]
-python = "^3.13"
-fastapi = "^0.141.1"
+[dependency-groups]
+dev = [
+    # anyio ships the pytest plugin the async tests run on; anyio_mode arrived in 4.11.
+    "anyio>=4.15.1,<5",
+    "hypothesis>=6.168.0,<7",
+    "import-linter>=2.15,<3",
+    "mypy>=2.3.1,<3",
+    "pre-commit>=4.6.2,<5",
+    "pytest>=9.1.1,<10",
+    "pytest-cov>=7.1.0,<8",
+    "respx>=0.23.1,<0.24",
+    "ruff>=0.16.8,<0.17",
+]
 
 [tool.poetry]
-packages = [{include = "src"}]
+requires-poetry = ">=2.2"
+packages = [{ include = "adrobot", from = "src" }]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
+requires = ["poetry-core>=2.2,<3.0"]
 build-backend = "poetry.core.masonry.api"
