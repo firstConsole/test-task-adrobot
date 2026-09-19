@@ -191,3 +191,90 @@ docstring-code-line-length = 88
 # ruff formats python blocks inside Markdown too; README and docs keep their
 # snippets exactly as written.
 exclude = ["*.md"]
+
+# =============================================================================
+#  Mypy — static type checking
+# =============================================================================
+
+[tool.mypy]
+# One version, like requires-python: this is a service, not a library, so there
+# is no interpreter matrix to describe.
+python_version = "3.13"
+# Resolved against the process cwd, not against this file — mypy is invoked as
+# `cd backend && mypy`, the same rule ruff's `src` already carries. alembic/
+# joins this list at 1.9, together with the template that makes a generated
+# migration survive strict mode.
+files = ["src", "tests"]
+mypy_path = "src"
+# tests/ carries no __init__.py (1.1). Without this, `from tests.fakes import ...`
+# does not resolve and two test files sharing a basename abort the entire run
+# before a single module is checked. It is also what makes mypy_path above
+# load-bearing: module names become cwd-relative, so src/ has to stay the base.
+explicit_package_bases = true
+# Settings takes its required values from the environment and is constructed
+# with no arguments; without the plugin every call site is a false "missing
+# named argument". SQLAlchemy needs no plugin — Mapped[] types itself.
+plugins = ["pydantic.mypy"]
+
+warn_unused_configs = true
+strict = true
+warn_unreachable = true
+
+enable_error_code = [
+    "ignore-without-code",
+    "possibly-undefined",
+    "redundant-expr",
+    "truthy-bool",
+    "deprecated",
+    "mutable-override",
+]
+
+pretty = true
+
+[tool.pydantic-mypy]
+# The plugin replaces pydantic's own generated __init__ with one typed Any per
+# field: adopted at its defaults it would drop the wrong-keyword and wrong-type
+# errors that plain strict already reports. These two put them back.
+init_typed = true
+init_forbid_extra = true
+
+# =============================================================================
+#  Pytest
+# =============================================================================
+
+[tool.pytest.ini_options]
+minversion = "9.1"
+testpaths = ["tests"]
+addopts = [
+    # The skip reasons are the point, not decoration: on a clone without
+    # Postgres that line is the only evidence the database tier took itself
+    # off instead of passing.
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    # tests/ carries no __init__.py (1.1): prepend mode cannot collect two test
+    # files with the same basename, and `from tests.fakes import ...` fails.
+    "--import-mode=importlib",
+    # Safe next to §9 because SecretStr masks itself in every repr; what keeps
+    # it safe is a rule about test code — never bind .get_secret_value() to a
+    # local variable.
+    "--showlocals",
+]
+
+# 1.2 took the anyio plugin over pytest-asyncio. "auto" runs a bare
+# `async def test_*` with no decorator and no pytestmark.
+anyio_mode = "auto"
+
+# No entry for the deprecation fastapi.testclient raises under httpx 0.x: the
+# API tests go through httpx.ASGITransport, and the collection error is what
+# keeps them there.
+filterwarnings = ["error"]
+
+# Selection only. Whether Postgres is reachable is a runtime fact, so the skip
+# belongs to the fixture; the marker is what lets a fast loop and the unit CI
+# job say -m 'not db'.
+markers = [
+    "db: test that needs the PostgreSQL from compose or CI (deselect with -m 'not db').",
+]
+
+xfail_strict = true
