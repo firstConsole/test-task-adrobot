@@ -43,3 +43,151 @@ packages = [{ include = "adrobot", from = "src" }]
 [build-system]
 requires = ["poetry-core>=2.2,<3.0"]
 build-backend = "poetry.core.masonry.api"
+
+# =============================================================================
+#  Ruff — linter and formatter
+# =============================================================================
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+# Resolved relative to this file, so these are backend/src and backend/tests.
+# "." is deliberately absent: it would turn the sibling backend/alembic/
+# directory into a source root, and isort would then sort `from alembic import op`
+# as first-party in env.py and in every generated migration.
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",     # flake8-builtins
+    "ANN",   # flake8-annotations
+    "ARG",   # flake8-unused-arguments
+    "ASYNC", # flake8-async
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "C90",   # mccabe
+    "D",     # pydocstyle
+    "DTZ",   # flake8-datetimez
+    "E",     # pycodestyle errors
+    "EM",    # flake8-errmsg
+    "ERA",   # eradicate
+    "F",     # pyflakes
+    "FAST",  # FastAPI
+    "FBT",   # flake8-boolean-trap
+    "G",     # flake8-logging-format
+    "I",     # isort
+    "INP",   # flake8-no-pep420
+    "ISC",   # flake8-implicit-str-concat
+    "LOG",   # flake8-logging
+    "N",     # pep8-naming
+    "PERF",  # perflint
+    "PIE",   # flake8-pie
+    "PL",    # pylint (C/E/R/W)
+    "PT",    # flake8-pytest-style
+    "PTH",   # flake8-use-pathlib
+    "RET",   # flake8-return
+    "RSE",   # flake8-raise
+    "RUF",   # ruff-specific
+    "S",     # flake8-bandit
+    "SIM",   # flake8-simplify
+    "SLF",   # flake8-self
+    "TC",    # flake8-type-checking
+    "TID",   # flake8-tidy-imports
+    "TRY",   # tryceratops
+    "UP",    # pyupgrade
+    "W",     # pycodestyle warnings
+]
+
+# The google convention below switches these two off; this project wants them.
+extend-select = ["D400", "D401"]
+
+ignore = [
+    # The formatter joins an implicit concatenation only when the parts can be
+    # merged, and leaves the rest on one line — which ISC001 then reports on a
+    # file that `ruff format --check` calls clean.
+    "ISC001",
+    # A docstring is written where it explains a decision. A module, a package,
+    # a dunder, or an __init__ whose parameters are already typed can only
+    # restate its own name.
+    "D100",
+    "D104",
+    "D105",
+    "D107",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 1.1 removed tests/__init__.py on purpose — pytest collects in importlib mode.
+"tests/**/*.py" = [
+    "ANN",     # a test signature carries nothing worth annotating
+    "ARG",     # a fake port keeps arguments its scenario does not use
+    "D",       # the test name is the sentence
+    "INP001",  # no __init__.py by design
+    "PLR2004", # the numbers from the video are the specification
+    "S101",    # assert is how pytest reports
+    "S105",    # fake credentials in fixtures; gitleaks guards the real ones
+    "S106",
+    "S107",
+    "SLF001",  # private ordering helpers deserve direct tests
+]
+# alembic/ must not become a package: an __init__.py there would shadow the
+# installed alembic distribution, and versions/ is loaded by path anyway.
+"alembic/**/*.py" = ["INP001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+# tests/ carries no __init__.py, so a source root alone cannot classify it.
+known-first-party = ["adrobot", "tests"]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.flake8-bugbear]
+# A call in a default argument is every Depends()/Query()/Path(). The project
+# writes Annotated aliases instead and FAST002 enforces that, but B008 still
+# fires on the legacy shape as soon as the annotation is a class. File and Form
+# are absent: python-multipart is not a dependency, so they cannot be used.
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Cookie",
+    "fastapi.Depends",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.flake8-type-checking]
+# required-imports above turns every annotation into a string, so without these
+# the TC rules would move the imports that Pydantic and SQLAlchemy resolve at
+# runtime. Ruff follows a base-class chain only inside one file, which is why
+# the project's own declarative base is named next to SQLAlchemy's.
+runtime-evaluated-base-classes = [
+    "adrobot.infrastructure.db.base.Base",
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+    "sqlalchemy.orm.DeclarativeBase",
+]
+# FastAPI resolves a handler's annotations when the request arrives. An
+# Annotated alias or a request model hidden in TYPE_CHECKING does not raise:
+# the parameter silently degrades to a query parameter and the endpoint answers
+# 422 with its dependencies never wired. Every route hangs on an APIRouter.
+runtime-evaluated-decorators = [
+    "dataclasses.dataclass",
+    "fastapi.APIRouter.delete",
+    "fastapi.APIRouter.get",
+    "fastapi.APIRouter.patch",
+    "fastapi.APIRouter.post",
+    "fastapi.APIRouter.put",
+]
+# Replaces the default ["typing"], hence the repetition. FastAPI matches Request
+# by identity, and api/deps.py exports nothing but Annotated aliases, which are
+# runtime-significant by construction — a dependency callable that is not itself
+# a route carries no decorator for the setting above to match.
+exempt-modules = ["typing", "fastapi", "adrobot.api.deps"]
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 88
+# ruff formats python blocks inside Markdown too; README and docs keep their
+# snippets exactly as written.
+exclude = ["*.md"]
