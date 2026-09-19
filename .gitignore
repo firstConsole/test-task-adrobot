@@ -1,0 +1,68 @@
+# AD Robot monorepo — one ignore file for backend/, frontend/ and the root tooling.
+#
+# Deliberately NOT ignored, and they must stay that way:
+#   backend/poetry.lock, frontend/package-lock.json  reproducible builds
+#   .env.example                                     source of truth for the ADROBOT_* names
+#   backend/alembic/versions/*.py                    migrations are source, not artefacts
+#   docs/keitaro-openapi.json                        the Keitaro spec we develop against
+#   frontend/src/shared/api/schema.gen.ts            CI regenerates it and fails on drift
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+/backend/dist/
+
+# Virtualenvs — unanchored, so it covers the backend/.venv Poetry creates
+.venv/
+venv/
+
+# Tests and coverage
+.pytest_cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Type checker and linter caches
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+
+# Node and the frontend (arrives at stage 9)
+node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/.vite/
+*.tsbuildinfo
+.eslintcache
+npm-debug.log*
+
+# Secrets and local environment.
+# Two patterns rather than `.env*`: `.env.*` does not match `.env`, while `.env*`
+# would swallow both `.env.example` and `.envrc`. The negation must follow `.env.*`.
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+*.pem
+
+# Local runtime output
+*.log
+/docker-compose.override.yml
+
+# Scratch space for local API probing (stage 2). Keitaro returns a campaign's
+# Click API token inside the campaign object, so raw response dumps are secrets.
+/.scratch/
+
+# Editors and OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+*.sw[op]
+*~
+.claude/settings.local.json
