@@ -527,7 +527,7 @@ async def probe_offers(session: Session) -> None:
 
     if full.ok and full.elapsed_ms > SERVICE_READ_TIMEOUT_MS:
         session.finding(
-            "A full GET /offers fits inside the service's 10 s read timeout (§3.1)",
+            "A full GET /offers fits inside the service's 10 s read timeout",
             "refuted",
             f"{len(rows)} offers took {full.elapsed_ms} ms — the catalogue sync needs a "
             f"timeout of its own",

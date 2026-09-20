@@ -141,6 +141,10 @@ advertising budget.
 * `filterwarnings = ["error"]`. `fastapi.testclient.TestClient` is therefore unusable —
   it emits a deprecation under httpx 0.x. API tests go through `httpx.ASGITransport`.
 * Async tests need no decorator and no `pytestmark`: `anyio_mode = "auto"`.
+* **A fact about the Keitaro API belongs in `docs/keitaro-api-notes.md`**, under the
+  heading that says where it came from: the schema, or the tracker. A claim about the
+  schema also gets an assertion in `tests/test_keitaro_spec.py` — including the defects in
+  it, because one being fixed upstream is news too.
 * A bare `pytest` on a fresh clone is green. Tests that need PostgreSQL carry the `db`
   marker and skip with a visible reason.
 
