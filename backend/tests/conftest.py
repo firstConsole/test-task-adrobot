@@ -128,12 +128,13 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 
 # Deliberately not here yet, and which stage brings it:
 #
-#   4.x   tests/fakes.py — FakeKeitaroAdmin / FakeKeitaroReports, the second
-#         implementation of the ports. Nothing to fake before a port exists.
-#   4.3   a `client` that runs the lifespan. ASGITransport does not run one, and there is
-#         no lifespan to run; the day create_app grows one, this becomes
-#         `async with app.router.lifespan_context(app): yield http`. Written now it would
-#         be an empty context manager nobody would notice had stopped being empty.
+#   6.x   fixtures over tests/fakes.py. The fakes themselves arrived at 4.8; a fixture
+#         for one belongs in the commit that brings the first scenario to build on it,
+#         because what a scenario wants configured is not knowable before there is one.
+#   6.6   a `client` that runs the lifespan. ASGITransport does not run one, and there is
+#         still none to run: 4.3 gave the tracker client its own context manager instead
+#         of an application lifespan. The day create_app takes a ports factory, this
+#         becomes `async with app.router.lifespan_context(app): yield http`.
 #   5.1   a `db`-marked engine/session fixture that skips with a visible reason when
 #         Postgres is unreachable, and rolls back a transaction per test.
 #   6.8   an `authorised_client` carrying the shared token.
