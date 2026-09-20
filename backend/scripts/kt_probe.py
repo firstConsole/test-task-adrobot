@@ -93,6 +93,12 @@ FLOW_TWO: Final = "Flow 2"
 # limit itself or "longer than this".
 LONG_NAME_LENGTH: Final = 200
 
+# Questions 1 and 2, the ones the editor stands on. Three offers, with shares that are
+# distinct and do not sum to 100 after one is dropped: a tracker that silently normalises
+# what it was sent has nowhere to hide.
+PUT_FLOW: Final = "Offers"
+PUT_SHARES: Final = (50, 30, 20)
+
 ROWS_SHOWN: Final = 10
 CELL_WIDTH: Final = 30
 BODY_PREVIEW: Final = 400
@@ -283,9 +289,11 @@ class Session:
         """Create something. Never retried on a timeout: the outcome of one is unknown."""
         return await self._request("POST", path, label=label, payload=payload, may_fail=may_fail)
 
-    async def put(self, path: str, *, label: str, payload: dict[str, Any]) -> Observation:
+    async def put(
+        self, path: str, *, label: str, payload: dict[str, Any], may_fail: bool = False
+    ) -> Observation:
         """Replace something. The body always carries `action_type` and `schema` (§3.1)."""
-        return await self._request("PUT", path, label=label, payload=payload)
+        return await self._request("PUT", path, label=label, payload=payload, may_fail=may_fail)
 
     async def _request(  # noqa: PLR0913 — six axes of one HTTP call, not six concerns
         self,
@@ -590,8 +598,35 @@ async def _pick_offer(session: Session) -> int | None:
     return wanted
 
 
-def _campaign_findings(session: Session, campaign: Observation, payload: dict[str, Any]) -> None:
+async def _create_probe_campaign(
+    session: Session, *, group_id: int, name: str, tag: str, extra: dict[str, Any] | None = None
+) -> Observation:
+    """Create one throwaway campaign in the test group and put it in the ledger.
+
+    Every writing probe wants the same five fields and a different reason; the shape of a
+    create is written once so that a later probe cannot quietly drift from it.
+    """
+    payload: dict[str, Any] = {
+        "name": name,
+        # Lower case, because an alias becomes the path of a public link; stamped, because
+        # a colliding alias is one of the 406s stage 6 has to tell apart from the others.
+        "alias": f"adrobot-test-{tag}-{_stamp().lower()}",
+        # A string, as CampaignRequest declares it, although a campaign reads its group
+        # back as an integer. If this build wants an integer, the finding says so and 6.2
+        # sends what it wants rather than what the spec says.
+        "group_id": str(group_id),
+        "state": "active",
+        **(extra or {}),
+    }
+    created = await session.post("/campaigns", label=f"w-campaign-{tag}", payload=payload)
+    if created.ok:
+        session.record_created("campaign", _int_field(created, "id"), name)
+    return created
+
+
+def _campaign_findings(session: Session, campaign: Observation) -> None:
     """Record what the create itself said: its status, its group_id and its token."""
+    sent = campaign.sent if isinstance(campaign.sent, dict) else {}
     session.finding(
         "Creating a campaign answers 200, not 201",
         "confirmed" if campaign.status == HTTPStatus.OK else "refuted",
@@ -601,7 +636,7 @@ def _campaign_findings(session: Session, campaign: Observation, payload: dict[st
     session.finding(
         "A campaign takes group_id as a string and reads it back as an integer",
         "confirmed" if isinstance(echoed, int) else "refuted",
-        f"sent {payload['group_id']!r}, read back {echoed!r} ({type(echoed).__name__})",
+        f"sent {sent.get('group_id')!r}, read back {echoed!r} ({type(echoed).__name__})",
     )
     if isinstance(campaign.body, dict):
         session.finding(
@@ -722,30 +757,24 @@ async def probe_create(session: Session) -> None:
     source = await _pick(session, "/traffic_sources", label="w-sources", what="traffic source")
     offer_id = await _pick_offer(session)
 
-    stamp = _stamp()
-    campaign_payload: dict[str, Any] = {
-        "name": f"{TEST_GROUP} 2.2 {stamp}",
-        # Lower case, because an alias becomes the path of a public link; stamped, because
-        # a colliding alias is one of the 406s stage 6 has to tell apart from the others.
-        "alias": f"adrobot-test-{stamp.lower()}",
-        # A string, as CampaignRequest declares it, although a campaign reads its group
-        # back as an integer. If this build wants an integer, the finding says so and 6.2
-        # sends what it wants rather than what the spec says.
-        "group_id": str(group_id),
-        "state": "active",
-    }
+    references: dict[str, Any] = {}
     if domain is not None:
-        campaign_payload["domain_id"] = domain.get("id")
+        references["domain_id"] = domain.get("id")
     if source is not None:
-        campaign_payload["traffic_source_id"] = source.get("id")
+        references["traffic_source_id"] = source.get("id")
 
-    campaign = await session.post("/campaigns", label="w-campaign", payload=campaign_payload)
+    campaign = await _create_probe_campaign(
+        session,
+        group_id=group_id,
+        name=f"{TEST_GROUP} 2.2 {_stamp()}",
+        tag="flows",
+        extra=references,
+    )
     if not campaign.ok:
         print("    the campaign was refused; there is nothing to hang a flow on")
         return
+    _campaign_findings(session, campaign)
     campaign_id = _int_field(campaign, "id")
-    session.record_created("campaign", campaign_id, str(campaign_payload["name"]))
-    _campaign_findings(session, campaign, campaign_payload)
     if campaign_id is None:
         return
 
@@ -799,18 +828,8 @@ async def probe_name_limit(session: Session) -> None:
     group_id = await _ensure_test_group(session)
     if group_id is None:
         return
-    stamp = _stamp()
-    name = (f"{TEST_GROUP} {stamp} " + "x" * LONG_NAME_LENGTH)[:LONG_NAME_LENGTH]
-    created = await session.post(
-        "/campaigns",
-        label="w-long-name",
-        payload={
-            "name": name,
-            "alias": f"adrobot-test-long-{stamp.lower()}",
-            "group_id": str(group_id),
-            "state": "active",
-        },
-    )
+    name = (f"{TEST_GROUP} {_stamp()} " + "x" * LONG_NAME_LENGTH)[:LONG_NAME_LENGTH]
+    created = await _create_probe_campaign(session, group_id=group_id, name=name, tag="long-name")
     claim = f"A campaign name of {LONG_NAME_LENGTH} characters is accepted whole"
     if not created.ok:
         session.finding(
@@ -819,7 +838,6 @@ async def probe_name_limit(session: Session) -> None:
             f"POST /campaigns answered {created.status}: the limit is below {LONG_NAME_LENGTH}",
         )
         return
-    session.record_created("campaign", _int_field(created, "id"), f"{name[:40]}...")
     echoed = _field(created, "name")
     length = len(echoed) if isinstance(echoed, str) else 0
     if length == LONG_NAME_LENGTH:
@@ -830,6 +848,224 @@ async def probe_name_limit(session: Session) -> None:
             "refuted",
             f"accepted and silently cut to {length} characters: validate at our own boundary",
         )
+
+
+def _offer_rows(observation: Observation) -> dict[int, dict[str, Any]]:
+    """Return a flow's offers keyed by offer_id — the key the mirror uses, not the row id."""
+    raw = _field(observation, "offers")
+    rows = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    return {row["offer_id"]: row for row in rows if isinstance(row.get("offer_id"), int)}
+
+
+async def _pick_offers(session: Session, count: int) -> list[int]:
+    """Return several usable offer ids: this probe needs a row it can afford to drop."""
+    listed = await session.get("/offers", label="w-offers-many")
+    ids = [
+        row["id"]
+        for row in _rows(listed)
+        if isinstance(row.get("id"), int) and row.get("state") in (None, "active")
+    ]
+    chosen = ids[:count]
+    print(f"    offers: {chosen}")
+    return chosen
+
+
+OFFER_COLUMNS: Final = ("id", "offer_id", "share", "state", "created_at")
+
+
+def _survivor_findings(
+    session: Session,
+    before: dict[int, dict[str, Any]],
+    after: dict[int, dict[str, Any]],
+    dropped: int,
+) -> None:
+    """Answer questions 1 and 2 out of the same pair of reads."""
+    claim = "PUT /streams/{id} with a shorter offers[] deletes the rows the body leaves out"
+    if dropped not in after:
+        session.finding(claim, "confirmed", f"offer {dropped} was gone after a PUT that omitted it")
+    else:
+        row = after[dropped]
+        session.finding(
+            claim,
+            "refuted",
+            f"offer {dropped} survived as share={row.get('share')} state={row.get('state')}: "
+            f"the array is merged, so a removal has to travel as a disabled row",
+        )
+
+    survivors = [offer_id for offer_id in before if offer_id != dropped and offer_id in after]
+    if not survivors:
+        return
+    kept_id = [one for one in survivors if before[one].get("id") == after[one].get("id")]
+    session.finding(
+        "A row that survives a PUT keeps its own stream_offer id",
+        "confirmed" if len(kept_id) == len(survivors) else "refuted",
+        f"{len(kept_id)} of {len(survivors)} kept it: "
+        f"{[before[one].get('id') for one in survivors]} became "
+        f"{[after[one].get('id') for one in survivors]}",
+    )
+    kept_birth = [
+        one for one in survivors if before[one].get("created_at") == after[one].get("created_at")
+    ]
+    session.finding(
+        "A row that survives a PUT keeps its created_at, which the tie-break rule orders by",
+        "confirmed" if len(kept_birth) == len(survivors) else "refuted",
+        f"{len(kept_birth)} of {len(survivors)} kept it; a created_at the tracker resets on "
+        f"every push would leave our own mirror the only usable order",
+    )
+
+
+def _share_findings(
+    session: Session, after: dict[int, dict[str, Any]], expected: dict[int, int]
+) -> None:
+    """Check the invariant that what Keitaro returns is never normalised, against Keitaro."""
+    read_back = {offer_id: row.get("share") for offer_id, row in after.items()}
+    total = sum(value for value in read_back.values() if isinstance(value, int))
+    session.finding(
+        "Keitaro keeps the shares it was sent and does not normalise them back to 100",
+        "confirmed" if all(read_back.get(one) == expected[one] for one in expected) else "refuted",
+        f"sent {expected}, read back {read_back}, summing to {total}",
+    )
+
+
+async def _disabled_row_finding(
+    session: Session,
+    stream_id: int,
+    body: dict[str, Any],
+    rows: list[dict[str, Any]],
+    dropped: int,
+) -> None:
+    """Try the shape a push sends a removed row in: `{share: 0, state: disabled}`.
+
+    PLAN-01 §4 asserts this is right whether the array is replaced or merged, and it is
+    the one claim there that only a live tracker can settle. The whole object goes out,
+    the removed row among it, which is what 6.6 will do.
+    """
+    claim = "A removed offer can be pushed as {offer_id, share: 0, state: disabled}"
+    kept = [row for row in rows if row["offer_id"] != dropped]
+    payload = {**body, "offers": [*kept, {"offer_id": dropped, "share": 0, "state": "disabled"}]}
+    sent = await session.put(f"/streams/{stream_id}", label="w-put-disabled", payload=payload)
+    if not sent.ok:
+        session.finding(claim, "refuted", f"the PUT answered {sent.status}")
+        return
+    read = await session.get(f"/streams/{stream_id}", label="w-put-disabled-after", listing=False)
+    row = _offer_rows(read).get(dropped)
+    if row is None:
+        session.finding(
+            claim,
+            "confirmed",
+            "the tracker kept no row at all, which is also an offer that receives nothing",
+        )
+    elif row.get("state") == "disabled" and row.get("share") == 0:
+        session.finding(claim, "confirmed", f"offer {dropped} reads back disabled at share 0")
+    else:
+        session.finding(
+            claim,
+            "refuted",
+            f"offer {dropped} reads back share={row.get('share')} state={row.get('state')}",
+        )
+
+
+async def _partial_put_finding(
+    session: Session, stream_id: int, campaign_id: int, before: Observation
+) -> None:
+    """Ask directly whether a PUT is a replacement or a patch. Last: it can break the flow.
+
+    §3.1 resends `action_type` and `schema` on every update because nothing promises the
+    call is partial. This is that question asked of the tracker instead of assumed: a body
+    with nothing but `campaign_id` and `offers`, and then a look at what is left.
+    """
+    claim = "PUT /streams/{id} replaces the whole flow: a field the body omits is lost"
+    stripped = await session.put(
+        f"/streams/{stream_id}",
+        label="w-put-partial",
+        payload={"campaign_id": campaign_id, "offers": []},
+        may_fail=True,
+    )
+    if not stripped.ok:
+        session.finding(
+            claim,
+            "open",
+            f"a body carrying only campaign_id and offers was refused with {stripped.status}, "
+            f"so every field has to be resent either way",
+        )
+        return
+    after = await session.get(f"/streams/{stream_id}", label="w-put-partial-after", listing=False)
+    survived = [
+        field
+        for field in ("name", "type", "schema", "action_type")
+        if _field(after, field) == _field(before, field)
+    ]
+    session.finding(
+        claim,
+        "confirmed" if not survived else "refuted",
+        f"after a body naming none of them, these still match the original: "
+        f"{', '.join(survived) or 'none of them'}",
+    )
+
+
+async def probe_put_semantics(session: Session) -> None:
+    """Settle the key question: what PUT /streams/{id} does with a shortened offers[]."""
+    group_id = await _ensure_test_group(session)
+    if group_id is None:
+        return
+    offers = await _pick_offers(session, len(PUT_SHARES))
+    if len(offers) < 2:  # noqa: PLR2004 — one offer cannot be both kept and dropped
+        print("    this probe needs at least two offers in the catalogue")
+        return
+    campaign = await _create_probe_campaign(
+        session, group_id=group_id, name=f"{TEST_GROUP} 2.3 {_stamp()}", tag="put"
+    )
+    campaign_id = _int_field(campaign, "id")
+    if campaign_id is None:
+        return
+
+    rows: list[dict[str, Any]] = [
+        {"offer_id": offer_id, "share": share, "state": "active"}
+        for offer_id, share in zip(offers, PUT_SHARES, strict=False)
+    ]
+    body: dict[str, Any] = {
+        "campaign_id": campaign_id,
+        "type": "regular",
+        "name": PUT_FLOW,
+        "position": 1,
+        "schema": "landings",
+        "action_type": session.options.action_type,
+        "offers": rows,
+    }
+    created = await session.post("/streams", label="w-put-create", payload=body)
+    stream_id = _int_field(created, "id")
+    if stream_id is None:
+        print("    the flow was not created; there is nothing to PUT against")
+        return
+    session.record_created("stream", stream_id, PUT_FLOW)
+
+    before = await session.get(f"/streams/{stream_id}", label="w-put-before", listing=False)
+    rows_before = _offer_rows(before)
+    _print_rows(list(rows_before.values()), OFFER_COLUMNS, limit=session.options.rows_shown)
+
+    # The whole object again, one row shorter: only offers[] differs between the create
+    # and this call, so whatever changes is the answer and nothing else can be blamed.
+    dropped = offers[len(rows) - 1]
+    shortened = await session.put(
+        f"/streams/{stream_id}",
+        label="w-put-shortened",
+        payload={**body, "offers": rows[:-1]},
+    )
+    if not shortened.ok:
+        session.finding(
+            "PUT /streams/{id} accepts the body that created the flow, one offer shorter",
+            "refuted",
+            f"it answered {shortened.status}; questions 1 and 2 stay open",
+        )
+        return
+    after = await session.get(f"/streams/{stream_id}", label="w-put-after", listing=False)
+    rows_after = _offer_rows(after)
+    _print_rows(list(rows_after.values()), OFFER_COLUMNS, limit=session.options.rows_shown)
+
+    _survivor_findings(session, rows_before, rows_after, dropped)
+    _share_findings(session, rows_after, {row["offer_id"]: row["share"] for row in rows[:-1]})
+    await _disabled_row_finding(session, stream_id, body, rows, dropped)
+    await _partial_put_finding(session, stream_id, campaign_id, before)
 
 
 PROBES: Final = {
@@ -846,6 +1082,7 @@ PROBES: Final = {
 # is ceremony rather than a second opinion.
 WRITE_PROBES: Final = {
     "create": probe_create,
+    "put-semantics": probe_put_semantics,
     "name-limit": probe_name_limit,
 }
 ALL_PROBES: Final = {**PROBES, **WRITE_PROBES}
@@ -936,8 +1173,8 @@ async def _run(settings: Settings, names: tuple[str, ...], options: Options) -> 
 
 
 def _parse_args(argv: Sequence[str] | None) -> tuple[tuple[str, ...], Options]:
-    reading = "\n".join(f"  {name:11s} {_summary(probe)}" for name, probe in PROBES.items())
-    writing = "\n".join(f"  {name:11s} {_summary(probe)}" for name, probe in WRITE_PROBES.items())
+    reading = "\n".join(f"  {name:14s} {_summary(probe)}" for name, probe in PROBES.items())
+    writing = "\n".join(f"  {name:14s} {_summary(probe)}" for name, probe in WRITE_PROBES.items())
     parser = argparse.ArgumentParser(
         prog="kt_probe.py",
         description="Reconnaissance against a live Keitaro tracker (stage 2).",
