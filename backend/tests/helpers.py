@@ -11,7 +11,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Final
 
+from adrobot.domain.ids import OfferId
+from adrobot.domain.shares import OfferRow
+
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from io import StringIO
 
 # Written out here rather than imported from `adrobot.settings`. The prefix is a
@@ -43,3 +47,38 @@ def log_records(stream: StringIO) -> list[dict[str, Any]]:
 def records_named(stream: StringIO, event: str) -> list[dict[str, Any]]:
     """Return only the records whose `event` field equals `event`."""
     return [record for record in log_records(stream) if record.get("event") == event]
+
+
+def offer_row(  # noqa: PLR0913  # one keyword per field of OfferRow, by design
+    offer_id: int,
+    *,
+    seq: int,
+    activated_at: int | None = None,
+    share: int = 0,
+    pinned_share: int | None = None,
+    removed: bool = False,
+) -> OfferRow:
+    """Build one kernel row.
+
+    `activated_at` defaults to `seq`, which is the state a fetch from the tracker produces:
+    a row's creation order is also the order it was last activated in. The tests that care
+    about the tie-break — every one taken from the video — pass it explicitly.
+    """
+    return OfferRow(
+        offer_id=OfferId(offer_id),
+        seq=seq,
+        activated_at=seq if activated_at is None else activated_at,
+        share=share,
+        pinned_share=pinned_share,
+        removed=removed,
+    )
+
+
+def shares(rows: Iterable[OfferRow]) -> dict[int, int]:
+    """Offer id to share — the shape every assertion about the arithmetic is made in.
+
+    A dict and never a tuple: the wrong tie-break rule produces the same multiset of values
+    (34, 33, 33) against the right one, and only the pairing tells them apart. That pairing
+    is also what a reviewer sees when they open the stream in Keitaro.
+    """
+    return {int(row.offer_id): row.share for row in rows}
