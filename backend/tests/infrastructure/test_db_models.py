@@ -1,6 +1,7 @@
-"""The mirror's invariants, asserted against the mapping rather than against a reviewer.
+"""The mapping's invariants, asserted against the metadata rather than against a reviewer.
 
 Every test here reads the metadata or the compiled DDL, so none of them needs PostgreSQL.
+The three draft tables have their own module beside this one.
 """
 
 from __future__ import annotations
@@ -41,7 +42,9 @@ def test_every_relationship_refuses_to_lazy_load() -> None:
     assert set(lazy.values()) == {"raise_on_sql"}, lazy
 
 
-def test_no_foreign_key_deletes_a_row_the_mirror_would_rather_tombstone() -> None:
+def test_every_foreign_key_refuses_to_delete_the_row_it_points_at() -> None:
+    # The mirror tombstones rather than deletes, and an audit row's draft outlives it —
+    # which is why push_attempts.draft_id is RESTRICT and not PLAN §7's SET NULL.
     actions = {
         f"{key.parent.table.name}.{key.parent.name}": key.ondelete
         for table in Base.metadata.tables.values()
@@ -64,7 +67,10 @@ def test_the_tracker_assigns_its_own_ids_and_postgres_does_not() -> None:
     # A BIGSERIAL here would attach a sequence to a column only Keitaro writes, and an
     # insert that omitted the id would invent one.
     for name in Base.metadata.tables:
-        assert "SERIAL" not in ddl(name).upper(), name
+        rendered = ddl(name).upper()
+        assert "SERIAL" not in rendered, name
+        # An identity column would pass the letter of the line above and break its intent.
+        assert "IDENTITY" not in rendered, name
 
 
 def test_no_constraint_has_an_opinion_about_a_share_read_from_the_tracker() -> None:
@@ -91,4 +97,5 @@ def test_our_own_enumerations_store_the_value_and_not_the_member_name() -> None:
     # 'PRESENT' while every server_default and query says 'present'.
     assert "mirror_state IN ('present', 'absent')" in ddl("streams")
     assert "setup_status IN ('ready', 'needs_attention')" in ddl("campaigns")
+    assert "status IN ('open', 'pushing', 'pushed', 'discarded')" in ddl("stream_drafts")
     assert models.MirrorState.PRESENT.value == "present"

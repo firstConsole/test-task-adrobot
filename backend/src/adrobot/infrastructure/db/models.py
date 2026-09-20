@@ -12,17 +12,25 @@ screen shows are deliberately absent here.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, text
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from adrobot.application.push import PushOutcome
 from adrobot.domain.campaign import CampaignSetupStatus
-from adrobot.domain.ids import CampaignId, KeitaroCampaignId, KeitaroStreamId, OfferId
+from adrobot.domain.draft import DraftStatus
+from adrobot.domain.ids import (
+    CampaignId,
+    DraftId,
+    KeitaroCampaignId,
+    KeitaroStreamId,
+    OfferId,
+)
 from adrobot.infrastructure.db.base import Base, TimestampsMixin
 
 
@@ -37,9 +45,7 @@ class MirrorState(StrEnum):
     ABSENT = "absent"
 
 
-def _as_varchar_with_check[E: StrEnum | CampaignSetupStatus](
-    enumeration: type[E], name: str, length: int
-) -> SqlEnum:
+def _as_varchar_with_check[E: Enum](enumeration: type[E], name: str, length: int) -> SqlEnum:
     """Persist one of our own enumerations as VARCHAR plus a named CHECK.
 
     Not a native PostgreSQL enum: `mirror_state` is used by two tables, alembic creates a
@@ -61,6 +67,8 @@ def _as_varchar_with_check[E: StrEnum | CampaignSetupStatus](
 
 MIRROR_STATE = _as_varchar_with_check(MirrorState, "mirror_state", 8)
 SETUP_STATUS = _as_varchar_with_check(CampaignSetupStatus, "setup_status", 16)
+DRAFT_STATUS = _as_varchar_with_check(DraftStatus, "draft_status", 10)
+PUSH_OUTCOME = _as_varchar_with_check(PushOutcome, "push_outcome", 14)
 
 
 class DbCampaign(Base, TimestampsMixin):
@@ -210,4 +218,98 @@ class DbOfferPin(Base, TimestampsMixin):
         # Ours, and the only number a client can influence — hence the range check that
         # stream_offers.share is denied.
         CheckConstraint("locked_share BETWEEN 0 AND 100", name="locked_share_is_a_percentage"),
+    )
+
+
+class DbStreamDraft(Base, TimestampsMixin):
+    """One flow's staged edits, and what the tracker looked like when they started."""
+
+    __tablename__ = "stream_drafts"
+
+    id: Mapped[DraftId] = mapped_column(primary_key=True, default=uuid4)
+    stream_id: Mapped[KeitaroStreamId] = mapped_column(
+        ForeignKey("streams.keitaro_stream_id", ondelete="RESTRICT")
+    )
+    status: Mapped[DraftStatus] = mapped_column(DRAFT_STATUS, server_default=text("'open'"))
+    # Written once, at the insert that opens the draft, over the rows the tracker still
+    # returns. Recomputing it on an edit would re-baseline the conflict check into a no-op.
+    base_snapshot_hash: Mapped[str]
+
+    rows: Mapped[list[DbStreamDraftRow]] = relationship(
+        lazy="raise_on_sql",
+        # The lambda is not redundant: DbStreamDraftRow is defined below this class.
+        order_by=lambda: DbStreamDraftRow.seq.asc(),  # noqa: PLW0108
+    )
+
+    __table_args__ = (
+        # The full truth of the column, not an approximation of it: a `.digest()` where a
+        # `.hexdigest()` belongs would otherwise answer 409 to every push, forever.
+        CheckConstraint(
+            "base_snapshot_hash ~ '^[0-9a-f]{64}$'", name="base_snapshot_hash_is_a_sha256_digest"
+        ),
+        # Named by hand: the convention's `ix_` template can say neither "unique" nor
+        # "partial", and a partial unique in PostgreSQL has to be an Index.
+        Index(
+            "uq_stream_drafts_live_draft_per_stream",
+            "stream_id",
+            unique=True,
+            postgresql_where=text("status IN ('open', 'pushing')"),
+        ),
+    )
+
+
+class DbStreamDraftRow(Base):
+    """The rows of one draft as the last recalculation left them."""
+
+    __tablename__ = "stream_draft_rows"
+
+    draft_id: Mapped[DraftId] = mapped_column(
+        ForeignKey("stream_drafts.id", ondelete="RESTRICT"), primary_key=True
+    )
+    # No ForeignKey to offers.id, for the reason stream_offers gives; the composite key is
+    # also what makes DuplicateOfferRowError unrepresentable.
+    offer_id: Mapped[OfferId] = mapped_column(primary_key=True)
+    seq: Mapped[int]
+    # An ordinal and not a clock, as OfferRow's docstring insists. INTEGER, never DateTime.
+    activated_at: Mapped[int]
+    # redistribute()'s output, stored rather than recomputed on read: a pin must move no
+    # share until the next edit, which a recalculation at render time would break.
+    share: Mapped[int]
+    removed: Mapped[bool] = mapped_column(server_default=text("false"))
+
+    __table_args__ = (
+        UniqueConstraint("draft_id", "seq"),
+        # Exactly one row can be the most recently activated. This is what obliges the
+        # seeding mapper to rank with row_number() rather than rank(): a tie would hand the
+        # rounding remainder to seq, which is a different rule from the one chosen.
+        UniqueConstraint("draft_id", "activated_at"),
+        CheckConstraint("seq > 0 AND activated_at > 0", name="ordinals_are_positive"),
+        # Ours, so checked — the opposite of stream_offers.share, which is the tracker's.
+        CheckConstraint("share BETWEEN 0 AND 100", name="share_is_a_percentage"),
+    )
+
+
+class DbPushAttempt(Base, TimestampsMixin):
+    """One press of PUSH TO KT, opened before the tracker is called and closed after it.
+
+    Written in phase 1 rather than phase 3 so that a process dying mid-write still leaves a
+    dated record: that row is how a later request tells a wedged push from a live one.
+    """
+
+    __tablename__ = "push_attempts"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    # NOT NULL where PLAN-BACKEND §7 asked for ON DELETE SET NULL: a draft is closed softly
+    # and never deleted, so the nullable column would only describe a state nothing creates.
+    draft_id: Mapped[DraftId] = mapped_column(ForeignKey("stream_drafts.id", ondelete="RESTRICT"))
+    outcome: Mapped[PushOutcome] = mapped_column(PUSH_OUTCOME, server_default=text("'in_flight'"))
+    desired_state: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    # The join to the structured log, which already holds the method, status and duration.
+    # A caller outside a request — the CLI — mints one with new_correlation_id().
+    correlation_id: Mapped[str]
+
+    __table_args__ = (
+        CheckConstraint("jsonb_typeof(desired_state) = 'array'", name="desired_state_is_an_array"),
+        # The newest attempt of one draft, for the wedged-push branch and for a postmortem.
+        Index(None, "draft_id", "created_at"),
     )

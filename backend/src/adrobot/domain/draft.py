@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from adrobot.domain.errors import (
     OfferAlreadyInStreamError,
@@ -25,6 +25,24 @@ from adrobot.domain.shares import OfferRow, redistribute, reject_duplicate_rows,
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
+
+
+class DraftStatus(Enum):
+    """Where a draft is in its life.
+
+    A failed push is an event and not a state: the draft goes back to `OPEN` with its rows
+    untouched, so a network blip does not throw the user's edits away.
+    """
+
+    OPEN = "open"
+    PUSHING = "pushing"
+    PUSHED = "pushed"
+    DISCARDED = "discarded"
+
+
+LIVE_DRAFT_STATUSES: Final = (DraftStatus.OPEN, DraftStatus.PUSHING)
+"""The statuses at most one draft per stream may hold. A second draft opened while the
+first is being pushed would be seeded from the pre-push mirror and would revert it."""
 
 
 class DraftOperationKind(Enum):

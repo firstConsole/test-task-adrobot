@@ -11,8 +11,14 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Final
 
+from sqlalchemy import CheckConstraint
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateTable, Table
+
 from adrobot.domain.ids import OfferId
 from adrobot.domain.shares import OfferRow
+from adrobot.infrastructure.db import models  # noqa: F401  # registers the tables on Base
+from adrobot.infrastructure.db.base import Base
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -82,3 +88,29 @@ def shares(rows: Iterable[OfferRow]) -> dict[int, int]:
     is also what a reviewer sees when they open the stream in Keitaro.
     """
     return {int(row.offer_id): row.share for row in rows}
+
+
+# SQLAlchemy does not annotate its dialect constructors, and this is the suite's one
+# PostgreSQL dialect.
+POSTGRES = postgresql.dialect()  # type: ignore[no-untyped-call]
+
+
+def table(table_name: str) -> Table:
+    """One mapped table. Through the metadata and not through `cls.__table__`, which
+    DeclarativeBase types as a `FromClause` with no indexes or constraints on it."""
+    return Base.metadata.tables[table_name]
+
+
+def ddl(table_name: str) -> str:
+    """Compile one table's CREATE TABLE, which is where a server default and an enumeration's
+    CHECK render as the literals a migration will carry."""
+    return str(CreateTable(table(table_name)).compile(dialect=POSTGRES))
+
+
+def checks(table_name: str) -> dict[str, str]:
+    """Every CHECK constraint on one table, by name."""
+    return {
+        str(constraint.name): str(constraint.sqltext)
+        for constraint in table(table_name).constraints
+        if isinstance(constraint, CheckConstraint)
+    }
