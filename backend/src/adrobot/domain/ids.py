@@ -12,6 +12,9 @@ from uuid import UUID
 
 CampaignId = NewType("CampaignId", UUID)
 DraftId = NewType("DraftId", UUID)
+# Handed from push phase 1 to phase 3, across an HTTP call, beside a DraftId that is also a
+# UUID — which is the mix-up this module exists to make mypy reject.
+PushAttemptId = NewType("PushAttemptId", UUID)
 
 KeitaroCampaignId = NewType("KeitaroCampaignId", int)
 KeitaroStreamId = NewType("KeitaroStreamId", int)

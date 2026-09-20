@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum, StrEnum
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
@@ -39,6 +39,7 @@ from adrobot.domain.ids import (
     KeitaroCampaignId,
     KeitaroStreamId,
     OfferId,
+    PushAttemptId,
 )
 from adrobot.infrastructure.db.base import Base, TimestampsMixin
 
@@ -366,7 +367,7 @@ class DbPushAttempt(Base, TimestampsMixin):
 
     __tablename__ = "push_attempts"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    id: Mapped[PushAttemptId] = mapped_column(primary_key=True, default=uuid4)
     # NOT NULL where PLAN-BACKEND §7 asked for ON DELETE SET NULL: a draft is closed softly
     # and never deleted, so the nullable column would only describe a state nothing creates.
     draft_id: Mapped[DraftId] = mapped_column(ForeignKey("stream_drafts.id", ondelete="RESTRICT"))
