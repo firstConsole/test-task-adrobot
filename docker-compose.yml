@@ -1,0 +1,45 @@
+name: adrobot
+
+services:
+  db:
+    image: docker.io/library/postgres:18-trixie
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env first}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env first}
+      POSTGRES_DB: ${POSTGRES_DB:?copy .env.example to .env first}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      start_period: 15s
+      retries: 15
+
+  migrator:
+    image: adrobot-api:dev
+    pull_policy: never
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["alembic", "upgrade", "head"]
+    healthcheck:
+      disable: true
+
+  api:
+    image: adrobot-api:dev
+    build:
+      context: ./backend
+    pull_policy: build
+    env_file: .env
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:8000:8000"
+
+volumes:
+  pgdata:

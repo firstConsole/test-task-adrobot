@@ -1,0 +1,97 @@
+# The three contracts of PLAN-BACKEND §1, as checks rather than prose.
+#
+# Run from backend/: the config, the root package and the cache directory are all
+# resolved from the working directory, exactly as with ruff and mypy.
+#
+# configparser has no inline comments — `key = value  # why` puts the text into
+# the value — so every comment here stands on a line of its own.
+
+[importlinter]
+root_package = adrobot
+# Load-bearing for the first contract: without it the graph holds first-party
+# modules only, and a third-party import into domain/ becomes invisible.
+include_external_packages = True
+# exclude_type_checking_imports is deliberately left unset. The flake8-type-checking
+# rules push typing-only imports into `if TYPE_CHECKING:` blocks throughout this
+# codebase, and a type-only import of an infrastructure class into application/ is
+# still a dependency of application/ on infrastructure/.
+
+[importlinter:contract:domain-imports-only-stdlib]
+name = domain imports nothing but the standard library
+type = forbidden
+source_modules =
+  adrobot.domain
+# Stated as a permission list rather than a denylist of known packages. `*` is every
+# top-level module in the graph and `adrobot.*` is every sibling ring, so the default
+# is "forbidden"; the standard library domain/ may use is granted below. A dependency
+# added in a later stage is caught on the day it reaches domain/, with no list here
+# to extend and nothing to forget.
+# `pydantic` is redundant while include_external_packages is set above, and that is
+# its purpose: an external forbidden module makes import-linter refuse to run without
+# that option, so deleting it fails loudly instead of emptying this contract in
+# silence.
+forbidden_modules =
+  *
+  adrobot.*
+  pydantic
+# Direct imports only. Every grant below is a direct edge to a standard-library
+# module, and no standard-library module reaches a forbidden one, so an escape from
+# domain/ always begins with a direct edge that is reported anyway. Leaving this off
+# adds no coverage and makes a violation report open with "domain is not allowed to
+# import __future__", contradicting the grant a few lines down.
+allow_indirect_imports = True
+# A permission list, not an inventory of today's imports: an entry may sit here
+# unused, and anything absent from it breaks the contract.
+ignore_imports =
+  adrobot.domain.** -> __future__
+  adrobot.domain.** -> collections
+  adrobot.domain.** -> dataclasses
+  adrobot.domain.** -> datetime
+  adrobot.domain.** -> enum
+  adrobot.domain.** -> re
+  adrobot.domain.** -> typing
+  adrobot.domain.** -> uuid
+  adrobot.domain -> __future__
+# The default (error) would fail the run for every granted module that domain/ does
+# not happen to import yet.
+unmatched_ignore_imports_alerting = none
+broken_contract_guidance =
+  A standard-library module belongs in the permission list above.
+  Anything else belongs in application/ or infrastructure/, behind a port.
+
+[importlinter:contract:application-imports-no-adapters]
+name = application imports neither infrastructure nor api
+type = forbidden
+# domain/ is not a second source module: the contract above already forbids it every
+# sibling ring, infrastructure and api included.
+source_modules =
+  adrobot.application
+forbidden_modules =
+  adrobot.api
+  adrobot.infrastructure
+# Indirect imports stay checked here, unlike above: composition.py legitimately sees
+# every ring, so a use case importing it is how this boundary actually gets breached.
+broken_contract_guidance =
+  Depend on an ABC in application/ports/ and let composition.py wire the
+  implementation. Importing composition.py from a use case reaches infrastructure
+  and breaks this contract too.
+
+[importlinter:contract:keitaro-wire-models-stay-behind-mapping]
+name = the Keitaro wire models are imported only by mapping.py
+# `protected` rather than `forbidden` with an ignored edge: it is the one contract
+# type that reads "only these importers", and it looks at direct imports, so the
+# legitimate admin.py -> mapping.py -> schemas.py chain stays legal.
+type = protected
+# Both sides are single modules, not packages. This also decides what happens
+# between stages 4.2 and 4.6, when schemas.py exists and mapping.py does not: at the
+# default a named module missing from the graph aborts the whole run, and a rename
+# of mapping.py reports "not present in the graph" instead of naming the module that
+# now imports the wire models.
+as_packages = False
+protected_modules =
+  adrobot.infrastructure.keitaro.schemas
+allowed_importers =
+  adrobot.infrastructure.keitaro.mapping
+broken_contract_guidance =
+  The Kt* models are the wire format, not a domain type. Convert it in mapping.py
+  and pass the domain object on.

@@ -1,0 +1,304 @@
+[project]
+name = "adrobot"
+version = "0.1.0"
+description = "FastAPI service over the Keitaro tracker Admin API: creates campaigns and redistributes offer shares inside a stream."
+authors = [{ name = "firstConsole", email = "artamonov008@yandex.ru" }]
+# One interpreter on purpose: this is a service, not a library. The same 3.13 is
+# pinned in the Docker base image and in mypy's python_version.
+requires-python = ">=3.13,<3.14"
+# Floors are the versions resolved and tested today; ceilings are the next release
+# each project's own policy allows to break.
+dependencies = [
+    "alembic>=1.20.0,<2",
+    "asyncpg>=0.31.0,<0.32",
+    "fastapi>=0.141.1,<0.142",
+    "httpx>=0.28.1,<0.29",
+    "pydantic>=2.13.5,<3",
+    "pydantic-settings>=2.15.0,<3",
+    # The asyncio extra is not redundant: without it greenlet carries a platform
+    # marker that excludes darwin/arm64, and the first async query raises MissingGreenlet.
+    "sqlalchemy[asyncio]>=2.0.54,<2.1",
+    "structlog>=26.1.0,<27",
+    "uvicorn>=0.53.0,<0.54",
+]
+
+[dependency-groups]
+dev = [
+    # anyio ships the pytest plugin the async tests run on; anyio_mode arrived in 4.11.
+    "anyio>=4.15.1,<5",
+    "hypothesis>=6.168.0,<7",
+    "import-linter>=2.15,<3",
+    "mypy>=2.3.1,<3",
+    "pre-commit>=4.6.2,<5",
+    "pytest>=9.1.1,<10",
+    "pytest-cov>=7.1.0,<8",
+    "respx>=0.23.1,<0.24",
+    "ruff>=0.16.8,<0.17",
+]
+
+[tool.poetry]
+requires-poetry = ">=2.2"
+packages = [{ include = "adrobot", from = "src" }]
+
+[build-system]
+requires = ["poetry-core>=2.2,<3.0"]
+build-backend = "poetry.core.masonry.api"
+
+# =============================================================================
+#  Ruff — linter and formatter
+# =============================================================================
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+# Resolved relative to this file, so these are backend/src and backend/tests.
+# "." is deliberately absent: it would turn the sibling backend/alembic/
+# directory into a source root, and isort would then sort `from alembic import op`
+# as first-party in env.py and in every generated migration.
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "A",     # flake8-builtins
+    "ANN",   # flake8-annotations
+    "ARG",   # flake8-unused-arguments
+    "ASYNC", # flake8-async
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "C90",   # mccabe
+    "D",     # pydocstyle
+    "DTZ",   # flake8-datetimez
+    "E",     # pycodestyle errors
+    "EM",    # flake8-errmsg
+    "ERA",   # eradicate
+    "F",     # pyflakes
+    "FAST",  # FastAPI
+    "FBT",   # flake8-boolean-trap
+    "G",     # flake8-logging-format
+    "I",     # isort
+    "INP",   # flake8-no-pep420
+    "ISC",   # flake8-implicit-str-concat
+    "LOG",   # flake8-logging
+    "N",     # pep8-naming
+    "PERF",  # perflint
+    "PIE",   # flake8-pie
+    "PL",    # pylint (C/E/R/W)
+    "PT",    # flake8-pytest-style
+    "PTH",   # flake8-use-pathlib
+    "RET",   # flake8-return
+    "RSE",   # flake8-raise
+    "RUF",   # ruff-specific
+    "S",     # flake8-bandit
+    "SIM",   # flake8-simplify
+    "SLF",   # flake8-self
+    "TC",    # flake8-type-checking
+    "TID",   # flake8-tidy-imports
+    "TRY",   # tryceratops
+    "UP",    # pyupgrade
+    "W",     # pycodestyle warnings
+]
+
+# The google convention below switches these two off; this project wants them.
+extend-select = ["D400", "D401"]
+
+ignore = [
+    # The formatter joins an implicit concatenation only when the parts can be
+    # merged, and leaves the rest on one line — which ISC001 then reports on a
+    # file that `ruff format --check` calls clean.
+    "ISC001",
+    # A docstring is written where it explains a decision. A module, a package,
+    # a dunder, or an __init__ whose parameters are already typed can only
+    # restate its own name.
+    "D100",
+    "D104",
+    "D105",
+    "D107",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# 1.1 removed tests/__init__.py on purpose — pytest collects in importlib mode.
+"tests/**/*.py" = [
+    "ANN",     # a test signature carries nothing worth annotating
+    "ARG",     # a fake port keeps arguments its scenario does not use
+    "D",       # the test name is the sentence
+    "INP001",  # no __init__.py by design
+    "PLR2004", # the numbers from the video are the specification
+    "S101",    # assert is how pytest reports
+    "S105",    # fake credentials in fixtures; gitleaks guards the real ones
+    "S106",
+    "S107",
+    "SLF001",  # private ordering helpers deserve direct tests
+]
+# alembic/ must not become a package: an __init__.py there would shadow the
+# installed alembic distribution, and versions/ is loaded by path anyway.
+"alembic/**/*.py" = ["INP001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+# tests/ carries no __init__.py, so a source root alone cannot classify it.
+known-first-party = ["adrobot", "tests"]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.flake8-bugbear]
+# A call in a default argument is every Depends()/Query()/Path(). The project
+# writes Annotated aliases instead and FAST002 enforces that, but B008 still
+# fires on the legacy shape as soon as the annotation is a class. File and Form
+# are absent: python-multipart is not a dependency, so they cannot be used.
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Cookie",
+    "fastapi.Depends",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.flake8-type-checking]
+# required-imports above turns every annotation into a string, so without these
+# the TC rules would move the imports that Pydantic and SQLAlchemy resolve at
+# runtime. Ruff follows a base-class chain only inside one file, which is why
+# the project's own declarative base is named next to SQLAlchemy's.
+runtime-evaluated-base-classes = [
+    "adrobot.infrastructure.db.base.Base",
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+    "sqlalchemy.orm.DeclarativeBase",
+]
+# FastAPI resolves a handler's annotations when the request arrives. An
+# Annotated alias or a request model hidden in TYPE_CHECKING does not raise:
+# the parameter silently degrades to a query parameter and the endpoint answers
+# 422 with its dependencies never wired. Every route hangs on an APIRouter.
+runtime-evaluated-decorators = [
+    "dataclasses.dataclass",
+    "fastapi.APIRouter.delete",
+    "fastapi.APIRouter.get",
+    "fastapi.APIRouter.patch",
+    "fastapi.APIRouter.post",
+    "fastapi.APIRouter.put",
+]
+# Replaces the default ["typing"], hence the repetition. FastAPI matches Request
+# by identity, and api/deps.py exports nothing but Annotated aliases, which are
+# runtime-significant by construction — a dependency callable that is not itself
+# a route carries no decorator for the setting above to match.
+exempt-modules = ["typing", "fastapi", "adrobot.api.deps"]
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = 88
+# ruff formats python blocks inside Markdown too; README and docs keep their
+# snippets exactly as written.
+exclude = ["*.md"]
+
+# =============================================================================
+#  Mypy — static type checking
+# =============================================================================
+
+[tool.mypy]
+# One version, like requires-python: this is a service, not a library, so there
+# is no interpreter matrix to describe.
+python_version = "3.13"
+# Resolved against the process cwd, not against this file — mypy is invoked as
+# `cd backend && mypy`, the same rule ruff's `src` already carries.
+files = ["src", "tests", "alembic"]
+mypy_path = "src"
+# tests/ carries no __init__.py (1.1). Without this, `from tests.fakes import ...`
+# does not resolve and two test files sharing a basename abort the entire run
+# before a single module is checked. It is also what makes mypy_path above
+# load-bearing: module names become cwd-relative, so src/ has to stay the base.
+explicit_package_bases = true
+# Settings takes its required values from the environment and is constructed
+# with no arguments; without the plugin every call site is a false "missing
+# named argument". SQLAlchemy needs no plugin — Mapped[] types itself.
+plugins = ["pydantic.mypy"]
+
+warn_unused_configs = true
+strict = true
+warn_unreachable = true
+
+enable_error_code = [
+    "ignore-without-code",
+    "possibly-undefined",
+    "redundant-expr",
+    "truthy-bool",
+    "deprecated",
+    "mutable-override",
+]
+
+pretty = true
+
+[tool.pydantic-mypy]
+# The plugin replaces pydantic's own generated __init__ with one typed Any per
+# field: adopted at its defaults it would drop the wrong-keyword and wrong-type
+# errors that plain strict already reports. These two put them back.
+init_typed = true
+init_forbid_extra = true
+
+# =============================================================================
+#  Pytest
+# =============================================================================
+
+[tool.pytest.ini_options]
+minversion = "9.1"
+testpaths = ["tests"]
+addopts = [
+    # The skip reasons are the point, not decoration: on a clone without
+    # Postgres that line is the only evidence the database tier took itself
+    # off instead of passing.
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    # tests/ carries no __init__.py (1.1): prepend mode cannot collect two test
+    # files with the same basename, and `from tests.fakes import ...` fails.
+    "--import-mode=importlib",
+    # Safe next to §9 because SecretStr masks itself in every repr; what keeps
+    # it safe is a rule about test code — never bind .get_secret_value() to a
+    # local variable.
+    "--showlocals",
+]
+
+# 1.2 took the anyio plugin over pytest-asyncio. "auto" runs a bare
+# `async def test_*` with no decorator and no pytestmark.
+anyio_mode = "auto"
+
+# No entry for the deprecation fastapi.testclient raises under httpx 0.x: the
+# API tests go through httpx.ASGITransport, and the collection error is what
+# keeps them there.
+filterwarnings = ["error"]
+
+# Selection only. Whether Postgres is reachable is a runtime fact, so the skip
+# belongs to the fixture; the marker is what lets a fast loop and the unit CI
+# job say -m 'not db'.
+markers = [
+    "db: test that needs the PostgreSQL from compose or CI (deselect with -m 'not db').",
+]
+
+xfail_strict = true
+
+# =============================================================================
+#  Coverage
+# =============================================================================
+
+[tool.coverage.run]
+# The installed package by name, not a path: the project is installed editable, so a path
+# would measure one copy and report another. Resolved names still print as `src/adrobot/…`,
+# which is what the two `--include` gates in the Makefile match on.
+source_pkgs = ["adrobot"]
+# PLAN-BACKEND §2.1 asks for 100% of domain/shares.py by LINE AND BRANCH. Without this the
+# 100% gate would pass on a redistribute() whose `if reserved > TOTAL_SHARE` was never
+# taken in either direction.
+branch = true
+
+[tool.coverage.report]
+# `exclude_also` and never `exclude_lines`: the latter REPLACES coverage's defaults, and
+# those defaults are what exempt `if TYPE_CHECKING:` — a block the ruff config puts in
+# nearly every module — and the `...` bodies of the ABC ports. Replacing them would count
+# both as misses and sink the 100% gate.
+#
+# Only one entry, because the defaults already cover the rest. `@abstractmethod` is
+# deliberately absent: an exclusion that matches a decorator drops the whole decorated
+# body, so an abstract method that later grows a real implementation would leave the
+# denominator silently.
+exclude_also = ["raise NotImplementedError"]

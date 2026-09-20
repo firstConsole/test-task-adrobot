@@ -1,0 +1,29 @@
+name: Python environment
+description: Install the pinned Poetry, restore the cached venv and sync the backend from poetry.lock.
+
+runs:
+  using: composite
+  steps:
+    # Before setup-python, because `cache: poetry` needs the binary on PATH to work out
+    # which lock file to key the cache on.
+    - name: Install Poetry
+      shell: bash
+      # The version that wrote poetry.lock. An unpinned Poetry would eventually resolve
+      # the lock differently from every developer and from the Docker build.
+      run: pipx install poetry==2.4.1
+
+    - uses: actions/setup-python@v7
+      with:
+        # One interpreter, matching requires-python, mypy's python_version and the Docker
+        # base image. A matrix would be testing something this service never runs on.
+        python-version: "3.13"
+        cache: poetry
+        cache-dependency-path: backend/poetry.lock
+
+    # `sync` and not `install`, so a cache restored from an older lock cannot leave a
+    # stale package behind and turn a red build green. It is its own command in Poetry 2:
+    # `install --sync` still works and prints a deprecation notice.
+    - name: Install the backend
+      shell: bash
+      working-directory: backend
+      run: poetry sync
