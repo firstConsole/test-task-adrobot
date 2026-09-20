@@ -64,6 +64,9 @@ for anyone who reads it literally.
 | `GET /groups` marks `type` as `required: true` **and** gives it `default: campaigns` | Generated clients will disagree about whether it may be omitted | Always sent explicitly |
 | `GET /offers` has no parameters at all | There is no server-side search to build an autocomplete on | The offer catalogue is mirrored locally and searched there |
 | Two published clients call the action catalogue `/stream_actions`, the schema calls it `/streams_actions` | One of them is writing against a path that does not exist | Settled by the `catalogues` probe (§3) |
+| `CampaignRequest` takes `domain_id`; `Campaign` declares none | The domain a campaign was created on cannot be read back, so its public link cannot be rebuilt from the tracker | `Campaign` carries no `domain_id`; the link is built from the domain we sent |
+| `Stream.offer_selection` is readable and appears in no request schema | A replacing `PUT` would reset a setting that nothing is able to resend | Not modelled on either side, so it cannot look resendable |
+| `Trigger` spells the field `taget`; `TriggersStreamRequest` requires `target` | A trigger read from a flow cannot be written back through the schema as published | Triggers are not modelled; see §4 for what that costs |
 
 ## 3. What only the tracker can settle
 
@@ -166,6 +169,11 @@ this reconnaissance happens before the adapter and not after it.
   order — and our own mirror becomes the only place the real one exists.
 * **`action_payload` on `POST /streams`.** If the create drops it, part 1 is a create
   followed by an update, and every failure path in it doubles.
+* **Whether a `PUT` replaces the whole flow.** The same answer decides what a push costs
+  a flow it does not fully model. `filters` and `landings` are read and sent back, so they
+  survive either way; `triggers` cannot be, because the read and write schemas disagree
+  about the field's name. A flow with triggers keeps them if this build merges and loses
+  them if it replaces — no flow this service creates has any.
 * **The report dialect.** `dimensions`/`measures` or `grouping`/`metrics` decides the
   statistics adapter, and a wrong guess fails at the point where the numbers are read.
 

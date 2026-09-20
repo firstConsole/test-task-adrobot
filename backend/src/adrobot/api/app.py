@@ -68,9 +68,12 @@ def create_app(*, settings: Settings) -> FastAPI:
             # Note for 6.7: it answers `text/plain`, not `application/problem+json`.
             Middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES),
         ],
-        # No `lifespan` at 1.6. An empty one would be a context manager that yields; it
-        # arrives at 4.3 with the single `httpx.AsyncClient` it exists to own, and 6.6
-        # collapses that into `async with ports_factory(settings) as ports`.
+        # Still no `lifespan`, and from 4.3 that is a decision rather than an absence of
+        # anything to hold open. The tracker client has an owner of its own —
+        # `keitaro_transport(settings)`, in infrastructure/keitaro/transport.py — so the
+        # resource's lifetime lives in the module that knows what the resource is. 6.6
+        # wraps that in `async with ports_factory(settings) as ports` and hands the ports
+        # in; this factory still never learns that a socket exists.
     )
     app.include_router(health.router)
     return app

@@ -3,9 +3,11 @@
 The key is all-agent and can spend money, which makes "it reached a second module and
 then a log line" the one security bug on this project that costs something real.
 
-Written now, when `settings.py` is the only file that names the field, so one of the two
-allowances is used and the test already catches a regression today. It becomes the thing
-that holds the line at 4.3, when `transport.py` takes the second.
+Written at 1.x, when `settings.py` was the only file that named the field. Since 4.3 both
+allowances are used, and the assertions below are in both directions: a module outside the
+list naming the key fails, and so does the list naming a module that has stopped. The
+second half is what stops the rule quietly becoming vacuous — a refactor that moved the
+header into a composition root would otherwise leave a green test guarding nothing.
 """
 
 from __future__ import annotations
@@ -56,6 +58,18 @@ def test_only_the_allowed_modules_name_the_tracker_key() -> None:
     assert naming <= MAY_NAME_THE_FIELD, (
         f"{FIELD} reached {sorted(naming - MAY_NAME_THE_FIELD)}. It is read in "
         f"transport.py and nowhere else; pass a built client, not the key."
+    )
+
+
+def test_the_module_that_is_supposed_to_read_the_key_still_does() -> None:
+    # The other direction, and the one that keeps the rule from becoming vacuous: if the
+    # key stopped being read where the allowlist says it is read, the allowlist is now
+    # describing a module that does not exist and the real one is unlisted.
+    reading = _modules_containing(FIELD) & _modules_containing("get_secret_value")
+
+    assert "infrastructure/keitaro/transport.py" in reading, (
+        "the tracker key is unwrapped in transport.py and this allowlist is what says so; "
+        "if the header is now built somewhere else, that somewhere else is unguarded"
     )
 
 
