@@ -181,6 +181,27 @@ def test_deleting_a_campaign_is_an_archive_that_answers_201() -> None:
     assert "/campaigns/clean_archive" in _at("paths"), "the archive is emptied separately"
 
 
+def test_a_campaign_cannot_be_asked_which_domain_it_was_created_on() -> None:
+    assert "domain_id" in _properties("CampaignRequest")
+    assert "domain_id" not in _properties("Campaign"), (
+        "§2: the domain is write-only, so a campaign's public link is built from what was "
+        "sent and cannot be rebuilt by reading the campaign back"
+    )
+
+
+def test_two_flow_fields_are_readable_and_cannot_be_written_back() -> None:
+    assert "offer_selection" in _properties("Stream")
+    assert "offer_selection" not in _properties("StreamObject"), (
+        "§2: a replacing PUT would reset a setting nothing is able to resend"
+    )
+    assert "taget" in _properties("Trigger"), "§2: the read schema misspells `target`"
+    assert "target" not in _properties("Trigger")
+    assert "target" in _schema("TriggersStreamRequest")["required"], (
+        "§2: read and write disagree about the field's name, so a trigger cannot make the "
+        "round trip and this project does not model one"
+    )
+
+
 def test_the_action_catalogue_is_spelled_with_an_s() -> None:
     assert "/streams_actions" in _at("paths")
     assert "/stream_actions" not in _at("paths"), (

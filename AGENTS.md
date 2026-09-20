@@ -176,6 +176,13 @@ assume.
   has wrapped them in `SecretStr` yet. That is why `UnknownSettingError` and
   `MissingSettingError` inherit `Exception`, and why the validator unbinds its argument
   before raising.
+* A pydantic field named `schema` — or `payload` on a model whose base declares a
+  `payload()` method — emits `UserWarning: Field name "..." shadows an attribute in parent`
+  at **class-definition time**. Under `filterwarnings = ["error"]` that is an ImportError,
+  and the traceback points at pydantic's internals rather than at the field. Keitaro's
+  flows have a `schema`, so `KtStream` carries `flow_schema` with `alias="schema"` and the
+  wire spelling stays on the wire.
+
 * `ruff check --fix` on a freshly generated migration deletes `import sqlalchemy as sa`
   and `from alembic import op` as unused. The pre-commit hook therefore reports and does
   not fix.
