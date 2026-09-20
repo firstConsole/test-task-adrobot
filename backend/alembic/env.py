@@ -26,6 +26,9 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from adrobot.infrastructure.db import (
+    models,  # noqa: F401  # imported so its tables reach the metadata
+)
 from adrobot.infrastructure.db.base import Base
 from adrobot.logging import configure_logging
 from adrobot.settings import Settings
@@ -33,8 +36,8 @@ from adrobot.settings import Settings
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
 
-# `--autogenerate` compares the database against this. A table only appears in it once
-# its module has been imported, so 5.2 imports models.py here for that side effect.
+# `--autogenerate` compares the database against this. A table only appears in it once its
+# module has been imported, which is what the models import above is for.
 target_metadata = Base.metadata
 
 _settings = Settings()

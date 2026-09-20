@@ -1,0 +1,213 @@
+"""The mirror: our copy of what Keitaro holds, and the pins we keep beside it.
+
+Two rules shape every table here. The mirror of somebody else's data is tolerant — their
+values arrive as text and integers with no CHECK, because a campaign we cannot open is
+worse than a number we disagree with. What is ours is strict.
+
+The mirror is a read model, not the source of a push payload: `replace_stream_offers`
+re-reads the flow from the tracker before writing it, so the fields of a flow that no
+screen shows are deliberately absent here.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, text
+from sqlalchemy import Enum as SqlEnum
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from adrobot.domain.campaign import CampaignSetupStatus
+from adrobot.domain.ids import CampaignId, KeitaroCampaignId, KeitaroStreamId, OfferId
+from adrobot.infrastructure.db.base import Base, TimestampsMixin
+
+
+class MirrorState(StrEnum):
+    """Whether the tracker still returns this row.
+
+    Never leaves the ORM: the mapper folds it into `OfferRow.removed`, which is the only
+    distinction a screen draws.
+    """
+
+    PRESENT = "present"
+    ABSENT = "absent"
+
+
+def _as_varchar_with_check[E: StrEnum | CampaignSetupStatus](
+    enumeration: type[E], name: str, length: int
+) -> SqlEnum:
+    """Persist one of our own enumerations as VARCHAR plus a named CHECK.
+
+    Not a native PostgreSQL enum: `mirror_state` is used by two tables, alembic creates a
+    shared type implicitly and never drops it, and `ALTER TYPE` cannot run in the same
+    transaction as the migration that needs it.
+    """
+    return SqlEnum(
+        enumeration,
+        name=name,
+        native_enum=False,
+        length=length,
+        create_constraint=True,
+        validate_strings=True,
+        # Without this SQLAlchemy stores the member NAME, so the column would hold
+        # 'NEEDS_ATTENTION' while every server_default and query says 'needs_attention'.
+        values_callable=lambda members: [member.value for member in members],
+    )
+
+
+MIRROR_STATE = _as_varchar_with_check(MirrorState, "mirror_state", 8)
+SETUP_STATUS = _as_varchar_with_check(CampaignSetupStatus, "setup_status", 16)
+
+
+class DbCampaign(Base, TimestampsMixin):
+    """A campaign this service has opened, plus the local facts the tracker cannot give back."""
+
+    __tablename__ = "campaigns"
+
+    # Generated in Python, so a campaign and its flows are built before the one flush.
+    id: Mapped[CampaignId] = mapped_column(primary_key=True, default=uuid4)
+    keitaro_campaign_id: Mapped[KeitaroCampaignId] = mapped_column(unique=True)
+    alias: Mapped[str]
+    name: Mapped[str]
+    state: Mapped[str]
+    setup_status: Mapped[CampaignSetupStatus] = mapped_column(
+        SETUP_STATUS, server_default=text("'ready'")
+    )
+    # `Campaign` has no domain_id on the read side, so a public link this service does not
+    # store can never be rebuilt. Null for an imported campaign, which has none of ours.
+    public_domain: Mapped[str | None]
+    # Part 1's two inputs, kept only so that repairing a half-created campaign can rebuild
+    # Flow 1's country filter and Flow 2's single row.
+    requested_country: Mapped[str | None]
+    requested_offer_id: Mapped[OfferId | None]
+    # The editor's staleness figure. Distinct from `updated_at`, which moves only when a
+    # fetch found a difference.
+    synced_at: Mapped[datetime | None]
+
+    streams: Mapped[list[DbStream]] = relationship(
+        lazy="raise_on_sql",
+        order_by=lambda: (DbStream.position.asc(), DbStream.keitaro_stream_id.asc()),
+    )
+
+    __table_args__ = (
+        # The keyset page: WHERE (created_at, id) < (:c, :i) ORDER BY created_at DESC, id DESC.
+        Index(None, "created_at", "id"),
+    )
+
+
+class DbStream(Base, TimestampsMixin):
+    """One flow, reduced to what the editor draws a group from, plus the tombstone pair."""
+
+    __tablename__ = "streams"
+
+    # Without autoincrement=False the DDL is BIGSERIAL: Postgres would attach a sequence to
+    # a column only the tracker assigns, and an insert omitting it would invent an id.
+    keitaro_stream_id: Mapped[KeitaroStreamId] = mapped_column(
+        primary_key=True, autoincrement=False
+    )
+    campaign_id: Mapped[CampaignId] = mapped_column(ForeignKey("campaigns.id", ondelete="RESTRICT"))
+    name: Mapped[str]
+    # Whether the group renders an offer table at all: only `landings` rotates offers.
+    schema: Mapped[str]
+    position: Mapped[int | None]
+    # The header's geo line, in the domain's own {id, name, mode, payload} shape rather than
+    # the wire's — raw tracker JSON here would carry the wire format past mapping.py.
+    filters: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    mirror_state: Mapped[MirrorState] = mapped_column(
+        MIRROR_STATE, server_default=text("'present'")
+    )
+    absent_since: Mapped[datetime | None]
+
+    offers: Mapped[list[DbStreamOffer]] = relationship(
+        lazy="raise_on_sql",
+        # The tie-break order, made total: an unparsable stamp ranks oldest and so can never
+        # take the rounding remainder.
+        order_by=lambda: (
+            DbStreamOffer.keitaro_created_at.asc().nulls_first(),
+            DbStreamOffer.keitaro_row_id.asc().nulls_first(),
+            DbStreamOffer.offer_id.asc(),
+        ),
+    )
+    pins: Mapped[list[DbOfferPin]] = relationship(
+        lazy="raise_on_sql",
+        # The lambda is not redundant: DbOfferPin is defined below this class, so the
+        # reference has to be deferred.
+        order_by=lambda: DbOfferPin.offer_id.asc(),  # noqa: PLW0108
+    )
+
+    # No `campaign` relationship: its one caller would be the push, which takes the flow row
+    # FOR UPDATE — and a joinedload under with_for_update() compiles to FOR UPDATE over a
+    # LEFT OUTER JOIN, which PostgreSQL refuses at runtime and never at compile time.
+
+    __table_args__ = (
+        CheckConstraint(
+            "(mirror_state = 'absent') = (absent_since IS NOT NULL)",
+            name="absent_since_matches_mirror_state",
+        ),
+        # The aggregate's selectinload, and the index PostgreSQL does not create for a
+        # referencing column. Not unique: a tombstone keeps the position it had.
+        Index(None, "campaign_id", "position"),
+    )
+
+
+class DbStreamOffer(Base):
+    """One offer row of one flow, as the tracker holds it.
+
+    No `TimestampsMixin`, deliberately: a column named `created_at` beside
+    `keitaro_created_at` is the one mistake that silently misroutes the rounding remainder.
+    """
+
+    __tablename__ = "stream_offers"
+
+    stream_id: Mapped[KeitaroStreamId] = mapped_column(
+        ForeignKey("streams.keitaro_stream_id", ondelete="RESTRICT"), primary_key=True
+    )
+    # No ForeignKey to offers.id: an offer can reach a flow before it reaches our catalogue,
+    # and an unknown one renders as `#11234 (not in catalogue)` rather than failing the sync.
+    offer_id: Mapped[OfferId] = mapped_column(primary_key=True)
+    # Theirs, so no CHECK in either direction: a clean stream summing to 50 is real.
+    share: Mapped[int]
+    # Not the same fact as `mirror_state`: this is what a push left behind as disabled.
+    state: Mapped[str]
+    # How a push tells a row that survived the write from one recreated underneath it.
+    # Explicit BigInteger, since a bare `int` maps to INTEGER.
+    keitaro_row_id: Mapped[int | None] = mapped_column(BigInteger)
+    # The tie-break column the share rule names, in the tracker's zone as mapping.py read it.
+    keitaro_created_at: Mapped[datetime | None]
+    mirror_state: Mapped[MirrorState] = mapped_column(
+        MIRROR_STATE, server_default=text("'present'")
+    )
+    absent_since: Mapped[datetime | None]
+
+    __table_args__ = (
+        CheckConstraint(
+            "(mirror_state = 'absent') = (absent_since IS NOT NULL)",
+            name="absent_since_matches_mirror_state",
+        ),
+    )
+
+
+class DbOfferPin(Base, TimestampsMixin):
+    """One pinned share.
+
+    Kept in the mirror and outside the draft, so that it survives both a push and a cancel.
+    """
+
+    __tablename__ = "offer_pins"
+
+    stream_id: Mapped[KeitaroStreamId] = mapped_column(
+        ForeignKey("streams.keitaro_stream_id", ondelete="RESTRICT"), primary_key=True
+    )
+    # Row presence is the pin, so unpinning is a DELETE and no boolean can fall out of step.
+    offer_id: Mapped[OfferId] = mapped_column(primary_key=True)
+    locked_share: Mapped[int]
+
+    __table_args__ = (
+        # Ours, and the only number a client can influence — hence the range check that
+        # stream_offers.share is denied.
+        CheckConstraint("locked_share BETWEEN 0 AND 100", name="locked_share_is_a_percentage"),
+    )
