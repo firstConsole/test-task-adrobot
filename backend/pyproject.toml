@@ -132,6 +132,9 @@ ignore = [
 # alembic/ must not become a package: an __init__.py there would shadow the
 # installed alembic distribution, and versions/ is loaded by path anyway.
 "alembic/**/*.py" = ["INP001"]
+# scripts/ is deliberately not a package either: kt_probe.py (2.1) is run by path, and an
+# __init__.py would offer `import scripts.kt_probe` to code that has no business doing it.
+"scripts/**/*.py" = ["INP001"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -202,7 +205,10 @@ exclude = ["*.md"]
 python_version = "3.13"
 # Resolved against the process cwd, not against this file — mypy is invoked as
 # `cd backend && mypy`, the same rule ruff's `src` already carries.
-files = ["src", "tests", "alembic"]
+# scripts/ is in the list although nothing imports it. kt_probe.py (2.1) is run by hand
+# against a live tracker, so an undefined name in it would otherwise be found the
+# expensive way: halfway through a probe, against somebody's production data.
+files = ["src", "tests", "alembic", "scripts"]
 mypy_path = "src"
 # tests/ carries no __init__.py (1.1). Without this, `from tests.fakes import ...`
 # does not resolve and two test files sharing a basename abort the entire run
