@@ -1,10 +1,27 @@
 from __future__ import annotations
 
-import pytest
-from pydantic import ValidationError
+import traceback
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Final
 
-from adrobot.settings import ENV_PREFIX, Settings, UnknownSettingError
+import pytest
+from pydantic import BaseModel, ValidationError
+
+from adrobot.settings import (
+    ENV_PREFIX,
+    MissingSettingError,
+    Settings,
+    UnknownSettingError,
+    _missing_required_variables,
+)
 from tests.helpers import VALID_ENVIRONMENT
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+# Where `adrobot` is on disk, so a traceback walk can tell our frames from pydantic's.
+# Spelled the way tests/test_secret_containment.py spells it, for the same reason.
+SOURCE_ROOT: Final = Path(__file__).resolve().parents[1] / "src" / "adrobot"
 
 pytestmark = pytest.mark.usefixtures("valid_environment")
 
@@ -24,6 +41,13 @@ EXPECTED_FIELDS = frozenset(
         "keitaro_timezone",
     }
 )
+
+# The second construction path, derived from the first so the two cannot drift: what
+# `Settings()` finds in the environment, handed in by keyword instead. The values stay
+# strings, which is what the environment would have delivered anyway.
+VALID_KEYWORDS: Final[dict[str, Any]] = {
+    name.removeprefix(ENV_PREFIX).lower(): value for name, value in VALID_ENVIRONMENT.items()
+}
 
 
 def test_the_declared_fields_are_the_env_example_contract() -> None:
@@ -133,13 +157,215 @@ def test_all_misspelled_variables_are_reported_together(monkeypatch: pytest.Monk
     assert "ADROBOT_TYPO_TWO" in str(caught.value)
 
 
+def test_a_half_filled_environment_is_refused_without_echoing_the_key_it_was_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The first-run state `cp .env.example .env && docker compose up` produces: the two
+    # secrets filled in, the rest still blank. pydantic reported that as one "Field
+    # required" per absent field, each carrying `input_value=` — the merged settings dict,
+    # truncated from the middle, with `keitaro_api_key` still a plain `str` because
+    # nothing had wrapped it in a SecretStr yet. The truncation keeps the tail, so the end
+    # of the admin key went into the start-up traceback once per absent field.
+    for name in VALID_ENVIRONMENT:
+        if name not in {"ADROBOT_ENV", "ADROBOT_KEITARO_API_KEY"}:
+            monkeypatch.delenv(name)
+    secret = VALID_ENVIRONMENT["ADROBOT_KEITARO_API_KEY"]
+
+    with pytest.raises(MissingSettingError) as caught:
+        Settings()
+
+    message = str(caught.value)
+    assert {name for name in VALID_ENVIRONMENT if name in message} == {
+        "ADROBOT_DATABASE_URL",
+        "ADROBOT_ACCESS_TOKEN",
+        "ADROBOT_KEITARO_BASE_URL",
+        "ADROBOT_KEITARO_PUBLIC_BASE_URL",
+    }
+    # Fragments, not the whole value: `secret not in printed` passes against the unfixed
+    # file, because what leaked was the tail. Eight characters of an API key are already
+    # enough to recognise one in a paste.
+    printed = message + "".join(traceback.format_exception(caught.value))
+    assert not any(secret[at : at + 8] in printed for at in range(len(secret) - 7))
+
+
+def test_the_refusal_carries_no_second_surface_to_render_it_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `str(exc)` is not the only renderer of a ValidationError: `.errors()` and `.json()`
+    # hand back `input_value` whole and untruncated, so an error short enough to print
+    # cleanly still served the merged dict to anything structured — 6.7's problem+json
+    # body, a structured log of a start-up failure. A fix that only shortened the printed
+    # line would leave that open, so what is pinned here is that the exception has no
+    # state beyond its message, and that nothing upstream is chained behind it.
+    for name in VALID_ENVIRONMENT:
+        if name != "ADROBOT_KEITARO_API_KEY":
+            monkeypatch.delenv(name)
+    secret = VALID_ENVIRONMENT["ADROBOT_KEITARO_API_KEY"]
+
+    with pytest.raises(MissingSettingError) as caught:
+        Settings()
+
+    assert caught.value.args == (str(caught.value),)
+    assert caught.value.__cause__ is None
+    chained = "".join(traceback.format_exception(caught.value))
+    assert not any(secret[at : at + 8] in chained for at in range(len(secret) - 7))
+
+
+@pytest.mark.parametrize(
+    ("break_it", "expected"),
+    [
+        (lambda m: m.delenv("ADROBOT_DATABASE_URL"), MissingSettingError),
+        (lambda m: m.setenv("ADROBOT_KEITARO_APIKEY", "x"), UnknownSettingError),
+    ],
+    ids=["absent", "misspelled"],
+)
+def test_neither_refusal_leaves_a_configured_value_in_a_frame_of_ours(
+    monkeypatch: pytest.MonkeyPatch,
+    break_it: Callable[[pytest.MonkeyPatch], None],
+    expected: type[Exception],
+) -> None:
+    # The half of the promise a message cannot keep. `--showlocals` is in this project's
+    # own addopts, and a renderer that captures frame locals prints a frame's parameters
+    # whether or not the body reads them — so the validator's `data`, the merged dict with
+    # the admin key still a plain `str`, was printed twice per failure from a frame whose
+    # error text was clean. Hence the `del` on the refusing path; this is what makes it
+    # load-bearing rather than decorative. Only our own frames are asserted on:
+    # pydantic's `BaseModel.__init__` holds the same dict and is not ours to unbind — it
+    # sets `__tracebackhide__`, which is why pytest does not print it.
+    break_it(monkeypatch)
+    secrets = [
+        VALID_ENVIRONMENT[name] for name in ("ADROBOT_KEITARO_API_KEY", "ADROBOT_ACCESS_TOKEN")
+    ]
+
+    with pytest.raises(expected) as caught:
+        Settings()
+
+    ours = [
+        (frame.f_code.co_name, name, repr(value))
+        for frame, _ in traceback.walk_tb(caught.value.__traceback__)
+        if Path(frame.f_code.co_filename).is_relative_to(SOURCE_ROOT)
+        for name, value in frame.f_locals.items()
+    ]
+    assert ours, "no frame of ours was walked: the traceback shape changed"
+    assert not [
+        (function, name)
+        for function, name, printed in ours
+        for secret in secrets
+        if any(secret[at : at + 8] in printed for at in range(len(secret) - 7))
+    ]
+
+
+def test_an_empty_environment_names_every_required_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # One error listing six names, not six errors listing one each: an operator fixes the
+    # compose file in a single pass, for the reason the typo guard batches its names too.
+    for name in VALID_ENVIRONMENT:
+        monkeypatch.delenv(name)
+
+    with pytest.raises(MissingSettingError) as caught:
+        Settings()
+
+    message = str(caught.value)
+    assert {name for name in VALID_ENVIRONMENT if name in message} == set(VALID_ENVIRONMENT)
+    # The two fields that carry defaults are not demanded, and .env.example is where the
+    # operator is sent for the names that are.
+    assert f"{ENV_PREFIX}LOG_LEVEL" not in message
+    assert f"{ENV_PREFIX}KEITARO_TIMEZONE" not in message
+    assert ".env.example" in message
+
+
+def test_the_demanded_set_is_read_off_the_fields_rather_than_written_out() -> None:
+    # A hard-coded list would keep demanding a variable the day its field gains a default,
+    # and stop demanding one the day a default goes away. `is_required()` moves with the
+    # field; these two attributes are one field, before and after.
+    class Moving(BaseModel):
+        gained_a_default: str = "x"
+        still_required: str
+
+    assert _missing_required_variables([], Moving.model_fields) == {f"{ENV_PREFIX}STILL_REQUIRED"}
+    assert _missing_required_variables(["still_required"], Moving.model_fields) == frozenset()
+    # And against the real model, cross-checked against the list helpers.py writes out by
+    # hand — the one place in this suite that is allowed to be a literal.
+    assert _missing_required_variables([], Settings.model_fields) == frozenset(VALID_ENVIRONMENT)
+
+
+def test_the_missing_variable_error_is_not_a_validation_error() -> None:
+    # The lock on MissingSettingError not being a ValueError, for the reason
+    # UnknownSettingError carries: pydantic catches a ValueError out of a before-validator
+    # and re-reports it with `input_value=` set to the merged settings dict — which is
+    # exactly the disclosure this error closes, coming back through the door it shut.
+    assert not issubclass(MissingSettingError, ValueError)
+    assert not issubclass(MissingSettingError, AssertionError)
+
+
+def test_a_typo_is_reported_before_the_variable_it_made_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Why both checks sit in one validator in a fixed order. The key is missing *because*
+    # of the typo, and "ADROBOT_KEITARO_API_KEY has no value" would send an operator to
+    # add a line their compose file already has, spelled wrongly. An unrelated variable is
+    # missing as well, so this is not merely the causal pair.
+    monkeypatch.delenv("ADROBOT_KEITARO_API_KEY")
+    monkeypatch.delenv("ADROBOT_DATABASE_URL")
+    monkeypatch.setenv("ADROBOT_KEITAROO_API_KEY", "a-copy-of-the-key")
+
+    with pytest.raises(UnknownSettingError, match="ADROBOT_KEITAROO_API_KEY") as caught:
+        Settings()
+
+    assert "a-copy-of-the-key" not in str(caught.value)
+
+
+def test_keyword_construction_still_builds_a_complete_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The path production never takes and the suite's own fixtures do not either, which is
+    # why it needs stating: a completeness check reading os.environ instead of `data`
+    # would refuse this with every field supplied.
+    for name in VALID_ENVIRONMENT:
+        monkeypatch.delenv(name)
+
+    settings = Settings(**VALID_KEYWORDS)
+
+    assert settings.env == "dev"
+    assert settings.keitaro_timezone == "UTC"
+
+
+def test_keyword_construction_is_checked_for_completeness_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The other direction: a check reading only os.environ would let this through, and the
+    # error would arrive as pydantic's, with the input dict attached.
+    for name in VALID_ENVIRONMENT:
+        monkeypatch.delenv(name)
+    partial = {name: value for name, value in VALID_KEYWORDS.items() if name != "keitaro_api_key"}
+
+    with pytest.raises(MissingSettingError, match="ADROBOT_KEITARO_API_KEY"):
+        Settings(**partial)
+
+
+def test_the_unknown_variable_guard_still_fires_on_the_keyword_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The property the file had before this commit, on the path the new check made
+    # interesting: every field is supplied, so nothing is missing, and a stale export
+    # still has to stop the process.
+    for name in VALID_ENVIRONMENT:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("ADROBOT_KEITARO_TIMEZOME", "UTC")
+
+    with pytest.raises(UnknownSettingError, match="ADROBOT_KEITARO_TIMEZOME"):
+        Settings(**VALID_KEYWORDS)
+
+
 def test_an_unprefixed_variable_is_none_of_our_business(monkeypatch: pytest.MonkeyPatch) -> None:
     # Both halves: some other tool's KEITARO_API_KEY must not be read as ours, and must
-    # not be reported as a typo of ours either.
+    # not be reported as a typo of ours either. It is now reported as an absence, which is
+    # what it is, and the message names the variable this service does read.
     monkeypatch.delenv("ADROBOT_KEITARO_API_KEY")
     monkeypatch.setenv("KEITARO_API_KEY", "belongs-to-something-else")
 
-    with pytest.raises(ValidationError, match="keitaro_api_key") as caught:
+    with pytest.raises(MissingSettingError, match="ADROBOT_KEITARO_API_KEY") as caught:
         Settings()
 
     assert "belongs-to-something-else" not in str(caught.value)
@@ -148,10 +374,21 @@ def test_an_unprefixed_variable_is_none_of_our_business(monkeypatch: pytest.Monk
 def test_an_empty_value_reads_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     # `.env.example` ships the two secrets empty, so `cp .env.example .env && up` has to
     # fail naming the variable rather than 401 against the tracker an hour later.
+    # `env_ignore_empty` drops the name before the validator sees it, so the half-filled
+    # .env and the never-exported variable are one failure with one message — asserted
+    # rather than assumed, because that equality is what makes one message enough.
     monkeypatch.setenv("ADROBOT_KEITARO_API_KEY", "")
 
-    with pytest.raises(ValidationError, match="Field required"):
+    with pytest.raises(MissingSettingError) as empty:
         Settings()
+
+    monkeypatch.delenv("ADROBOT_KEITARO_API_KEY")
+
+    with pytest.raises(MissingSettingError) as absent:
+        Settings()
+
+    assert "ADROBOT_KEITARO_API_KEY" in str(empty.value)
+    assert str(empty.value) == str(absent.value)
 
 
 @pytest.mark.parametrize("field", ["access_token", "keitaro_api_key"])

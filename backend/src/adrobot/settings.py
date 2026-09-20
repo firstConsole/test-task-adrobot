@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
     from pydantic import ValidationInfo
+    from pydantic.fields import FieldInfo
 
 ENV_PREFIX: Final = "ADROBOT_"
 
@@ -77,6 +78,32 @@ class UnknownSettingError(Exception):
         super().__init__(message)
 
 
+class MissingSettingError(Exception):
+    """A required field has no value, said without printing the values that do have one.
+
+    Not a `ValueError`, for the reason `UnknownSettingError` gives above — there that is
+    a precaution, here it is the whole point. pydantic's own report for an absent field
+    reads `Field required [type=missing, input_value={...}]`, and on `BaseSettings` that
+    input value is the merged settings dict, holding `keitaro_api_key` as a plain `str`
+    because wrapping it in a `SecretStr` is the validation this error pre-empts. The repr
+    is truncated from the middle, so what reached the start-up traceback was the *tail* of
+    the admin key, once per absent field — which is also why the textual scan in
+    tests/test_secret_containment.py, grepping for the whole value, could not see it.
+
+    The message is composed from `Settings`'s own field names and from nothing else, so no
+    configured value is in scope where it is built.
+    """
+
+    def __init__(self, names: Iterable[str]) -> None:
+        listed = ", ".join(sorted(names))
+        message = (
+            f"required {ENV_PREFIX}* environment variables have no value: {listed}. "
+            f"Every name this service reads is in .env.example; copy it to .env and give "
+            f"each of these a value. An empty value counts as unset."
+        )
+        super().__init__(message)
+
+
 def _unknown_prefixed_variables(environ: Mapping[str, str], known: Iterable[str]) -> frozenset[str]:
     """Return the `ADROBOT_*` names in `environ` that no field would ever consume.
 
@@ -94,6 +121,30 @@ def _unknown_prefixed_variables(environ: Mapping[str, str], known: Iterable[str]
         name
         for name in environ
         if name.casefold().startswith(ENV_PREFIX.casefold()) and name.casefold() not in claimed
+    )
+
+
+def _missing_required_variables(
+    supplied: Iterable[str], fields: Mapping[str, FieldInfo]
+) -> frozenset[str]:
+    """Return the variable names of the required fields nothing has supplied a value for.
+
+    Read off `FieldInfo.is_required()` rather than written out: `log_level` and
+    `keitaro_timezone` carry defaults and must not be demanded, and the day a field gains
+    a default — or loses one — the demand moves with the field instead of waiting for
+    somebody to remember a second list. It is the derivation the suite's own
+    `test_every_required_field_is_in_the_canonical_test_environment` already uses, so the
+    two now agree by construction.
+
+    `supplied` is a view of names, never the mapping they were taken from: that mapping
+    still holds the admin key as a plain string at this point, and a name is the whole of
+    what this question needs.
+    """
+    present = {name.casefold() for name in supplied}
+    return frozenset(
+        f"{ENV_PREFIX}{name}".upper()
+        for name, field in fields.items()
+        if field.is_required() and name.casefold() not in present
     )
 
 
@@ -197,16 +248,43 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_unknown_variables(cls, data: dict[str, Any]) -> dict[str, Any]:
-        """Fail on a misspelled variable, before "field required" can point at the wrong one.
+    def _reject_an_unusable_environment(cls, data: dict[str, Any]) -> dict[str, Any]:
+        """Fail on a misspelled variable, then on an absent one, before pydantic reports either.
 
-        `mode="before"`: the typo is *why* the field is missing, so an after-validator
-        would never run. The check reads the process environment rather than `data`
-        because that is the channel the mistake arrives on — which also means a test
-        building `Settings` from explicit keyword arguments is still protected, and
-        that `data` is never read and so can never be echoed back.
+        `mode="before"` for both: the typo is *why* the field is missing, so an
+        after-validator would never run, and pydantic's report for an absent field is
+        itself the disclosure `MissingSettingError` exists to pre-empt.
+
+        One validator and not two, because the order is the behaviour and two could not
+        promise it — measured on pydantic 2.13, `mode="before"` model validators run in
+        *reverse* declaration order, so a split would make the error an operator sees a
+        fact about where the methods sit in the file. The typo has to win: it is usually
+        why the variable is absent, and naming the absence first would send an operator to
+        add a line their compose file already has, misspelled — which is verbatim the
+        wrong-variable report the unknown-name guard exists to end, arriving through the
+        new check.
+
+        The two read different things because the two mistakes arrive on different
+        channels. A prefixed name no field claims can only come from the process
+        environment and never appears in `data`, which is also why a `Settings` built from
+        keyword arguments is guarded. Absence is visible only in `data` — measured, a dict
+        keyed by field name, identically shaped whether the values came from the
+        environment, from keyword arguments or from both, and already emptied of what
+        `env_ignore_empty` discards. It is read as keys and handed on as keys, and the
+        refusing path unbinds it, so neither the message nor the frame beneath it can
+        carry a value.
         """
         unknown = _unknown_prefixed_variables(os.environ, cls.model_fields)
+        missing = _missing_required_variables(data.keys(), cls.model_fields)
+        if not (unknown or missing):
+            return data
+        # A traceback renderer that captures frame locals — pytest's own `--showlocals`,
+        # which this project turns on — prints a frame's parameters whether or not the body
+        # reads them, and `data` still holds the admin key as a plain `str`. Keeping it out
+        # of the message is half a promise while the frame under the message still carries
+        # it, so the refusing path lets go of it first. Measured: without this line the
+        # merged dict is printed twice per failure.
+        del data
         if unknown:
             raise UnknownSettingError(unknown)
-        return data
+        raise MissingSettingError(missing)
