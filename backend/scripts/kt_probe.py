@@ -50,6 +50,7 @@ from datetime import UTC, datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -99,6 +100,13 @@ LONG_NAME_LENGTH: Final = 200
 PUT_FLOW: Final = "Offers"
 PUT_SHARES: Final = (50, 30, 20)
 
+# Question 4. The two dimensions are the whole stats screen: clicks per flow and clicks per
+# offer (PLAN-BACKEND §3). The wide list is sent once, on its own, to find out which names
+# this build knows — a rejected column is named in the error body, which the dump keeps.
+REPORT_MEASURE: Final = "clicks"
+REPORT_DIMENSIONS: Final = ("stream_id", "offer_id")
+WIDE_MEASURES: Final = ("clicks", "campaign_unique_clicks", "conversions", "sales", "revenue")
+
 ROWS_SHOWN: Final = 10
 CELL_WIDTH: Final = 30
 BODY_PREVIEW: Final = 400
@@ -119,6 +127,7 @@ class Options:
     geo: str
     offer_id: int | None
     action_type: str
+    campaign_id: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,10 +255,17 @@ def _print_values(observation: Observation, *, limit: int) -> None:
 class Session:
     """Everything a probe is handed: the client, the dump directory and the run's tally."""
 
-    def __init__(self, client: httpx.AsyncClient, dump_dir: Path, options: Options) -> None:
+    def __init__(
+        self, client: httpx.AsyncClient, dump_dir: Path, options: Options, *, timezone: str
+    ) -> None:
         self._client = client
         self._dump_dir = dump_dir
         self.options = options
+        # Configuration rather than a constant: a report's day boundary is the tracker's
+        # own, and "clicks today" being off by an hour is exactly the kind of wrong number
+        # the task is judged on. 2.5 reads the tracker's zone and this value is what it is
+        # then compared against.
+        self.timezone = timezone
         self.calls = 0
         self.arrays = 0
         self.listings = 0
@@ -850,6 +866,211 @@ async def probe_name_limit(session: Session) -> None:
         )
 
 
+def _report_rows(observation: Observation) -> list[dict[str, Any]]:
+    """Return a report's rows, which arrive under `rows` rather than at the top level."""
+    raw = _field(observation, "rows")
+    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+
+
+def _report_body(
+    session: Session,
+    *,
+    dimension: str,
+    measures: tuple[str, ...] = (REPORT_MEASURE,),
+    dialect: Literal["spec", "clients"] = "spec",
+    campaign_id: int | None = None,
+) -> dict[str, Any]:
+    """Build one /report/build body in either dialect.
+
+    The two differ in two key names and in nothing else, which is what makes comparing
+    them worth anything: if one is refused, the names are the reason.
+    """
+    grouping, metrics = ("dimensions", "measures") if dialect == "spec" else ("grouping", "metrics")
+    body: dict[str, Any] = {
+        "range": {"interval": "today", "timezone": session.timezone},
+        grouping: [dimension],
+        metrics: list(measures),
+    }
+    if campaign_id is not None:
+        # FilterRequest — `{name, operator, expression}` — and not the `{name, mode,
+        # payload}` a flow filter uses. The two schemas are a word apart in the spec and
+        # mixing them up would only show up on the stats screen.
+        body["filters"] = [{"name": "campaign_id", "operator": "EQUALS", "expression": campaign_id}]
+    return body
+
+
+async def _pick_campaign(session: Session) -> int | None:
+    """Return the campaign a report is scoped to: the one asked for, or the first listed."""
+    if session.options.campaign_id is not None:
+        return session.options.campaign_id
+    listed = await session.get("/campaigns", label="report-campaigns", params={"limit": 1})
+    rows = _rows(listed)
+    session.finding(
+        "GET /campaigns takes offset and limit, where GET /offers takes nothing at all",
+        "confirmed" if listed.ok and len(rows) <= 1 else "refuted",
+        f"?limit=1 answered {listed.status} and returned {len(rows)}",
+    )
+    found = rows[0].get("id") if rows else None
+    return found if isinstance(found, int) else None
+
+
+def _dialect_finding(session: Session, spec: Observation, clients: Observation) -> None:
+    """Answer question 4, on which the whole statistics adapter rests."""
+    claim = "/report/build speaks the spec's dialect: dimensions and measures"
+    spec_rows, client_rows = len(_report_rows(spec)), len(_report_rows(clients))
+    if spec.ok and not clients.ok:
+        session.finding(
+            claim,
+            "confirmed",
+            f"dimensions/measures: {spec.status}; grouping/metrics: {clients.status}",
+        )
+    elif spec.ok and clients.ok:
+        agree = "the same report" if spec_rows == client_rows else "DIFFERENT reports"
+        session.finding(
+            claim,
+            "confirmed",
+            f"both were accepted and they are {agree}: {spec_rows} rows against {client_rows}",
+        )
+    elif clients.ok:
+        session.finding(
+            claim,
+            "refuted",
+            f"dimensions/measures: {spec.status}; grouping/metrics: {clients.status} — this "
+            f"build wants what the two working clients send, and the spec is wrong",
+        )
+    else:
+        session.finding(claim, "open", f"both were refused: {spec.status} and {clients.status}")
+
+
+def _envelope_findings(session: Session, report: Observation) -> None:
+    """Record the shape stage 8 parses: the envelope, and what one row is made of."""
+    body = report.body if isinstance(report.body, dict) else {}
+    session.finding(
+        "A report answers with an object — rows, total, meta — and not with a bare array",
+        "confirmed" if {"rows", "total"} <= set(body) else "refuted",
+        f"the body has the keys: {', '.join(sorted(map(str, body))) or 'none'}",
+    )
+    rows = _report_rows(report)
+    claim = "A report row is an object, although the spec types rows as an array of strings"
+    if not rows:
+        session.finding(
+            claim, "open", "the tracker had no clicks today, so there was no row to look at"
+        )
+        return
+    session.finding(claim, "confirmed", f"rows[0] has the keys: {', '.join(sorted(rows[0]))}")
+
+
+async def _report_query_findings(
+    session: Session,
+    dialect: Literal["spec", "clients"],
+    campaign_id: int | None,
+    baseline: int,
+) -> None:
+    """Try the four things stage 8 needs beyond the dialect, one variable per call."""
+    by_offer = await session.post(
+        "/report/build",
+        label="report-by-offer",
+        payload=_report_body(session, dimension=REPORT_DIMENSIONS[1], dialect=dialect),
+        may_fail=True,
+    )
+    session.finding(
+        f"{' and '.join(REPORT_DIMENSIONS)} are both usable dimensions, which is the stats screen",
+        "confirmed" if by_offer.ok else "refuted",
+        f"grouping by {REPORT_DIMENSIONS[1]} answered {by_offer.status}",
+    )
+
+    if campaign_id is not None:
+        filtered = await session.post(
+            "/report/build",
+            label="report-filtered",
+            payload=_report_body(
+                session, dimension=REPORT_DIMENSIONS[0], dialect=dialect, campaign_id=campaign_id
+            ),
+            may_fail=True,
+        )
+        session.finding(
+            "A report filter is {name, operator, expression} and scopes a report to a campaign",
+            "confirmed" if filtered.ok else "refuted",
+            f"campaign_id EQUALS {campaign_id} answered {filtered.status} with "
+            f"{len(_report_rows(filtered))} rows against {baseline} unfiltered",
+        )
+
+    today = datetime.now(ZoneInfo(session.timezone)).date().isoformat()
+    explicit = _report_body(session, dimension=REPORT_DIMENSIONS[0], dialect=dialect)
+    explicit["range"] = {"from": today, "to": today, "timezone": session.timezone}
+    dated = await session.post(
+        "/report/build", label="report-explicit-range", payload=explicit, may_fail=True
+    )
+    session.finding(
+        "A range can be given as explicit from/to dates instead of a named interval",
+        "confirmed" if dated.ok else "refuted",
+        f"from={today} to={today} in {session.timezone} answered {dated.status}",
+    )
+
+    wide = await session.post(
+        "/report/build",
+        label="report-wide-measures",
+        payload=_report_body(
+            session, dimension=REPORT_DIMENSIONS[0], measures=WIDE_MEASURES, dialect=dialect
+        ),
+        may_fail=True,
+    )
+    session.finding(
+        f"This build knows every measure the screen might want: {', '.join(WIDE_MEASURES)}",
+        "confirmed" if wide.ok else "refuted",
+        f"the wide list answered {wide.status}"
+        + ("" if wide.ok else "; the dump holds the body naming the column it rejected"),
+    )
+
+    sorted_body = _report_body(session, dimension=REPORT_DIMENSIONS[0], dialect=dialect)
+    sorted_body["sort"] = [{"name": REPORT_MEASURE, "order": "DESC"}]
+    ordered = await session.post(
+        "/report/build", label="report-sorted", payload=sorted_body, may_fail=True
+    )
+    session.finding(
+        "A report takes sort as {name, order}, so the screen does not have to sort itself",
+        "confirmed" if ordered.ok else "refuted",
+        f"sorting by {REPORT_MEASURE} DESC answered {ordered.status}",
+    )
+
+
+async def probe_report(session: Session) -> None:
+    """Settle which dialect /report/build speaks, and what one row of a report looks like.
+
+    A POST among the read-only probes, because it creates nothing: the report builder is a
+    query that happens to carry a body. Every call is scoped to today, so it is also a
+    cheap question to ask of somebody's live tracker.
+    """
+    campaign_id = await _pick_campaign(session)
+
+    # The two dialects first, on the smallest body either of them accepts and with no
+    # filter: whatever else is wrong, it cannot be what makes one of these fail.
+    spec = await session.post(
+        "/report/build",
+        label="report-spec-dialect",
+        payload=_report_body(session, dimension=REPORT_DIMENSIONS[0]),
+        may_fail=True,
+    )
+    clients = await session.post(
+        "/report/build",
+        label="report-client-dialect",
+        payload=_report_body(session, dimension=REPORT_DIMENSIONS[0], dialect="clients"),
+        may_fail=True,
+    )
+    _dialect_finding(session, spec, clients)
+
+    dialect: Literal["spec", "clients"] = "spec" if spec.ok else "clients"
+    working = spec if spec.ok else clients
+    if not working.ok:
+        print("    neither dialect was accepted; the rest of this probe has nothing to stand on")
+        return
+    rows = _report_rows(working)
+    print(f"    dialect: {dialect}, {len(rows)} rows today")
+    _print_rows(rows, (REPORT_DIMENSIONS[0], REPORT_MEASURE), limit=session.options.rows_shown)
+    _envelope_findings(session, working)
+    await _report_query_findings(session, dialect, campaign_id, len(rows))
+
+
 def _offer_rows(observation: Observation) -> dict[int, dict[str, Any]]:
     """Return a flow's offers keyed by offer_id — the key the mirror uses, not the row id."""
     raw = _field(observation, "offers")
@@ -1074,6 +1295,7 @@ PROBES: Final = {
     "domains": probe_domains,
     "offers": probe_offers,
     "catalogues": probe_catalogues,
+    "report": probe_report,
 }
 
 # Apart from PROBES and never in the default set: a bare `kt_probe.py` must not create
@@ -1147,7 +1369,7 @@ async def _run(settings: Settings, names: tuple[str, ...], options: Options) -> 
         timeout=TIMEOUT,
         follow_redirects=False,
     ) as client:
-        session = Session(client, run_dir, options)
+        session = Session(client, run_dir, options, timezone=settings.keitaro_timezone)
         # Sequentially, and without the service's semaphore: this points at somebody's
         # working tracker, and the order of the output is what makes it readable.
         for name in names:
@@ -1203,6 +1425,12 @@ def _parse_args(argv: Sequence[str] | None) -> tuple[tuple[str, ...], Options]:
         help="offer for flow 2; the first active offer in the catalogue by default",
     )
     parser.add_argument(
+        "--campaign-id",
+        type=int,
+        default=None,
+        help="campaign the report probe scopes to; the first one listed by default",
+    )
+    parser.add_argument(
         "--action-type",
         default=DEFAULT_ACTION_TYPE,
         help=f"action key for the redirect flow, from /streams_actions "
@@ -1218,6 +1446,7 @@ def _parse_args(argv: Sequence[str] | None) -> tuple[tuple[str, ...], Options]:
         geo=str(args.geo).strip(),
         offer_id=int(args.offer_id) if args.offer_id is not None else None,
         action_type=str(args.action_type),
+        campaign_id=int(args.campaign_id) if args.campaign_id is not None else None,
     )
     return names, options
 
