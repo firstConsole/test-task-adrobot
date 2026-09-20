@@ -15,6 +15,12 @@ import httpx
 import pytest
 import respx
 
+from adrobot.application.errors import (
+    UpstreamError,
+    UpstreamNotFoundError,
+    UpstreamProtocolError,
+    UpstreamUnavailableError,
+)
 from adrobot.infrastructure.keitaro.transport import (
     BACKOFF_CAP_SECONDS,
     KeitaroTransport,
@@ -56,37 +62,48 @@ async def test_a_read_is_retried_until_the_tracker_answers() -> None:
     assert (response.status_code, route.call_count) == (200, 3)
 
 
-async def test_a_read_gives_up_and_hands_the_last_answer_back() -> None:
+async def test_a_read_gives_up_after_the_third_attempt() -> None:
     async with respx.mock(base_url=BASE) as mock:
         route = mock.get("/campaigns").mock(return_value=httpx.Response(503))
 
-        response = await KeitaroTransport(httpx.AsyncClient(base_url=BASE), backoff=0.0).get(
-            "/campaigns"
-        )
+        with pytest.raises(UpstreamUnavailableError) as raised:
+            await KeitaroTransport(httpx.AsyncClient(base_url=BASE), backoff=0.0).get("/campaigns")
 
-    # Not an exception: naming what a 503 means to the application is errors.py's job, and
-    # the transport having its own opinion would mean two places to change.
-    assert (response.status_code, route.call_count) == (503, 3)
+    assert route.call_count == 3
+    assert raised.value.status == 503
 
 
 async def test_a_create_is_never_retried(transport: KeitaroTransport) -> None:
     async with respx.mock(base_url=BASE) as mock:
         route = mock.post("/campaigns").mock(return_value=httpx.Response(500))
 
-        response = await transport.post("/campaigns", json={"name": "Demo"})
+        with pytest.raises(UpstreamUnavailableError):
+            await transport.post("/campaigns", json={"name": "Demo"})
 
     assert route.call_count == 1, "a create that may have succeeded must not be sent twice"
-    assert response.status_code == 500
 
 
 async def test_a_create_that_timed_out_is_not_retried_either(transport: KeitaroTransport) -> None:
     async with respx.mock(base_url=BASE) as mock:
         route = mock.post("/campaigns").mock(side_effect=httpx.ReadTimeout("too slow"))
 
-        with pytest.raises(httpx.ReadTimeout):
+        with pytest.raises(UpstreamUnavailableError, match="ReadTimeout"):
             await transport.post("/campaigns", json={"name": "Demo"})
 
     assert route.call_count == 1, "the outcome is unknown, which is not the same as failed"
+
+
+async def test_a_refused_connection_is_not_asked_again(transport: KeitaroTransport) -> None:
+    async with respx.mock(base_url=BASE) as mock:
+        route = mock.get("/offers").mock(side_effect=httpx.ConnectError("refused"))
+
+        with pytest.raises(UpstreamUnavailableError, match="ConnectError"):
+            await transport.get("/offers")
+
+    assert route.call_count == 1, (
+        "a refused connection is a configuration fact, and three attempts would be three "
+        "chances for the admin key to reach whatever is answering on that address"
+    )
 
 
 async def test_a_report_is_retried_although_it_is_a_post(transport: KeitaroTransport) -> None:
@@ -113,13 +130,14 @@ async def test_a_flow_is_written_again_after_a_timeout(transport: KeitaroTranspo
     assert (response.status_code, route.call_count) == (200, 2)
 
 
-async def test_a_refusal_is_returned_at_once(transport: KeitaroTransport) -> None:
+async def test_a_refusal_is_raised_at_once(transport: KeitaroTransport) -> None:
     async with respx.mock(base_url=BASE) as mock:
         route = mock.get("/campaigns/93212").mock(return_value=httpx.Response(404))
 
-        response = await transport.get("/campaigns/93212")
+        with pytest.raises(UpstreamNotFoundError):
+            await transport.get("/campaigns/93212")
 
-    assert (response.status_code, route.call_count) == (404, 1), "a 404 is an answer"
+    assert route.call_count == 1, "a 404 is an answer, not a bad minute"
 
 
 async def test_a_redirect_is_an_answer_and_not_somewhere_to_go(
@@ -130,9 +148,10 @@ async def test_a_redirect_is_an_answer_and_not_somewhere_to_go(
             return_value=httpx.Response(302, headers={"location": "https://elsewhere.invalid/"})
         )
 
-        response = await transport.get("/campaigns")
+        with pytest.raises(UpstreamProtocolError, match=r"elsewhere\.invalid"):
+            await transport.get("/campaigns")
 
-    assert (response.status_code, route.call_count) == (302, 1), (
+    assert route.call_count == 1, (
         "following this would carry the Api-Key header to elsewhere.invalid"
     )
     assert records_named(log_stream, "keitaro.request")[0]["location"] == (
@@ -183,7 +202,8 @@ async def test_a_refused_body_is_logged_with_its_secrets_taken_out(
     async with respx.mock(base_url=BASE) as mock:
         mock.post("/campaigns").mock(return_value=httpx.Response(406, json=refusal))
 
-        await transport.post("/campaigns", json={"name": "Demo"})
+        with pytest.raises(UpstreamError):
+            await transport.post("/campaigns", json={"name": "Demo"})
 
     record = records_named(log_stream, "keitaro.request")[0]
     assert record["body"]["error"] == "alias is already taken", (
@@ -199,7 +219,8 @@ async def test_a_body_that_is_not_json_at_all_is_clipped_rather_than_dropped(
     async with respx.mock(base_url=BASE) as mock:
         mock.get("/campaigns").mock(return_value=httpx.Response(502, html="<h1>Bad Gateway</h1>"))
 
-        await transport.get("/campaigns")
+        with pytest.raises(UpstreamUnavailableError):
+            await transport.get("/campaigns")
 
     assert "Bad Gateway" in records_named(log_stream, "keitaro.request")[0]["body"]
 
@@ -210,7 +231,8 @@ async def test_the_admin_key_reaches_the_tracker_and_nothing_else(
     async with respx.mock(base_url=BASE) as mock:
         route = mock.get("/offers").mock(side_effect=[httpx.Response(500), httpx.Response(401)])
 
-        await transport.get("/offers")
+        with pytest.raises(UpstreamError):
+            await transport.get("/offers")
 
     assert route.calls[0].request.headers["Api-Key"] == THE_KEY
     assert THE_KEY not in log_stream.getvalue(), (

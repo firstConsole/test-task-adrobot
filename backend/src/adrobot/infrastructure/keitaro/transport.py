@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING, Any, Final
 import httpx
 import structlog
 
+from adrobot.infrastructure.keitaro.errors import raise_for_keitaro, unreachable_tracker
 from adrobot.logging import redact
 
 if TYPE_CHECKING:
@@ -96,9 +97,10 @@ def build_keitaro_client(settings: Settings) -> httpx.AsyncClient:
 class KeitaroTransport:
     """Every HTTP call to the tracker goes through one of these four methods.
 
-    It answers one question — did the tracker respond, and with what — and deliberately not
-    the next one. Turning a status into something the application can act on is
-    `errors.py`'s job, and turning a body into a domain object is `mapping.py`'s.
+    All four answer the same way: a successful response, or an exception from
+    `application/errors.py`. Which exception is `errors.py`'s judgement and not this
+    module's — nothing here reads a status except to decide whether to ask again — and
+    turning a body into a domain object is `mapping.py`'s.
     """
 
     def __init__(
@@ -161,14 +163,22 @@ class KeitaroTransport:
                 async with self._gate:
                     response = await self._client.request(method, path, params=params, json=json)
             except httpx.TimeoutException as exc:
-                self._log_timeout(method, path, exc, attempt=attempt, started=started)
+                self._log_failure(method, path, exc, attempt=attempt, started=started)
                 if final or not retry:
-                    raise
+                    raise unreachable_tracker(method, path, exc) from exc
                 await asyncio.sleep(_retry_delay(attempt, None, self._backoff))
                 continue
+            except httpx.HTTPError as exc:
+                # A refused connection, a name that does not resolve, a protocol error.
+                # Not retried, and translated here rather than left to escape as httpx's
+                # own type: a use case that had to import httpx would have the adapter's
+                # choice of client baked into it.
+                self._log_failure(method, path, exc, attempt=attempt, started=started)
+                raise unreachable_tracker(method, path, exc) from exc
 
             self._log(method, path, response, attempt=attempt, started=started)
             if not retry or final or not _is_retryable(response.status_code):
+                raise_for_keitaro(response)
                 return response
             await asyncio.sleep(
                 _retry_delay(attempt, response.headers.get("retry-after"), self._backoff)
@@ -205,8 +215,8 @@ class KeitaroTransport:
             fields["body"] = body
         logger.warning(_REQUEST_EVENT, **fields)
 
-    def _log_timeout(
-        self, method: str, path: str, exc: httpx.TimeoutException, *, attempt: int, started: float
+    def _log_failure(
+        self, method: str, path: str, exc: httpx.HTTPError, *, attempt: int, started: float
     ) -> None:
         logger.warning(
             _REQUEST_EVENT,
