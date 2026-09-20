@@ -79,6 +79,12 @@ SERVICE_READ_TIMEOUT_MS: Final = 10_000
 TEST_GROUP: Final = "ADROBOT-TEST"
 LEDGER: Final = SCRATCH_ROOT / "created.json"
 
+# Removal goes in this order because a flow hangs on a campaign and a campaign sits in a
+# group. `cleanup` is named here because the run banner says something different about it
+# than about the probes that create.
+LEDGER_KINDS: Final = ("stream", "campaign", "group")
+CLEANUP: Final = "cleanup"
+
 # The shape part 1 has to produce, from the task: flow 1 catches one country and redirects
 # to Google, flow 2 rotates offers. `country` is Keitaro's own filter name — the
 # `catalogues` probe prints the catalogue it comes from.
@@ -326,6 +332,10 @@ class Session:
         """Replace something. The body always carries `action_type` and `schema` (§3.1)."""
         return await self._request("PUT", path, label=label, payload=payload, may_fail=may_fail)
 
+    async def delete(self, path: str, *, label: str, may_fail: bool = False) -> Observation:
+        """Remove something. In this API that usually means archiving it; see the notes."""
+        return await self._request("DELETE", path, label=label, may_fail=may_fail)
+
     async def _request(  # noqa: PLR0913 — six axes of one HTTP call, not six concerns
         self,
         method: str,
@@ -393,6 +403,20 @@ class Session:
         """Record what the tracker did about a claim, in the words 2.6 will quote."""
         self.findings.append(Finding(claim=claim, verdict=verdict, evidence=evidence))
 
+    def read_ledger(self) -> list[dict[str, Any]]:
+        """Return everything the writing probes have created on this tracker, ever."""
+        if not LEDGER.exists():
+            return []
+        loaded = json.loads(LEDGER.read_text(encoding="utf-8"))
+        if not isinstance(loaded, list):
+            return []
+        return [row for row in loaded if isinstance(row, dict)]
+
+    def write_ledger(self, entries: list[dict[str, Any]]) -> None:
+        """Replace the ledger with `entries`, which is how a removal is recorded."""
+        LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        LEDGER.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+
     def record_created(self, kind: str, entity_id: object, name: str) -> None:
         """Append one created entity to the ledger, before anything else can go wrong.
 
@@ -400,14 +424,9 @@ class Session:
         from the moment the POST answered, so a crash between that and the end of the run
         must not be what makes it unfindable.
         """
-        LEDGER.parent.mkdir(parents=True, exist_ok=True)
-        entries: list[dict[str, object]] = []
-        if LEDGER.exists():
-            loaded = json.loads(LEDGER.read_text(encoding="utf-8"))
-            if isinstance(loaded, list):
-                entries = [row for row in loaded if isinstance(row, dict)]
+        entries = self.read_ledger()
         entries.append({"kind": kind, "id": entity_id, "name": name, "at": _stamp()})
-        LEDGER.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.write_ledger(entries)
         print(f"    + created {kind} {entity_id}: {name!r} — in the ledger, {len(entries)} so far")
 
     def write_findings(self) -> Path:
@@ -1002,6 +1021,146 @@ async def probe_settings(session: Session) -> None:
     )
 
 
+def _ledger_id(entry: dict[str, Any]) -> int | None:
+    value = entry.get("id")
+    return value if isinstance(value, int) else None
+
+
+def _ledger_name(entry: dict[str, Any]) -> str:
+    return str(entry.get("name", ""))
+
+
+async def _remove_stream(
+    session: Session, entry: dict[str, Any], ours: set[int], statuses: list[int]
+) -> tuple[bool, str]:
+    """Delete one flow, and only after its campaign is confirmed to be one of ours.
+
+    The guard is the point of the function. A ledger is a file, and a file can be edited,
+    truncated or hand-written; nothing about a flow's own name says it was ours, so what is
+    checked is the campaign it hangs on.
+    """
+    stream_id = _ledger_id(entry)
+    if stream_id is None:
+        return False, "the ledger row carries no id"
+    read = await session.get(
+        f"/streams/{stream_id}", label=f"c-stream-{stream_id}", listing=False, may_fail=True
+    )
+    if read.status == HTTPStatus.NOT_FOUND:
+        return True, "it was already gone"
+    campaign_id = _int_field(read, "campaign_id")
+    if campaign_id not in ours:
+        return False, f"it hangs on campaign {campaign_id}, which this ledger never created"
+    deleted = await session.delete(
+        f"/streams/{stream_id}", label=f"c-stream-{stream_id}-delete", may_fail=True
+    )
+    statuses.append(deleted.status)
+    return deleted.ok, f"DELETE answered {deleted.status}"
+
+
+async def _remove_campaign(
+    session: Session, entry: dict[str, Any], statuses: list[int]
+) -> tuple[bool, str]:
+    """Archive one campaign, if its recorded name says it was ever ours to archive."""
+    campaign_id = _ledger_id(entry)
+    if campaign_id is None:
+        return False, "the ledger row carries no id"
+    if not _ledger_name(entry).startswith(TEST_GROUP):
+        return False, f"its name {_ledger_name(entry)!r} does not begin with {TEST_GROUP}"
+    deleted = await session.delete(
+        f"/campaigns/{campaign_id}", label=f"c-campaign-{campaign_id}", may_fail=True
+    )
+    statuses.append(deleted.status)
+    if deleted.status == HTTPStatus.NOT_FOUND:
+        return True, "it was already gone"
+    return deleted.ok, f"DELETE answered {deleted.status}, which archives rather than deletes"
+
+
+async def _remove_group(
+    session: Session, entry: dict[str, Any], statuses: list[int]
+) -> tuple[bool, str]:
+    """Delete the test group, which only works once nothing is left inside it."""
+    group_id = _ledger_id(entry)
+    if group_id is None:
+        return False, "the ledger row carries no id"
+    if _ledger_name(entry) != TEST_GROUP:
+        return False, f"its name {_ledger_name(entry)!r} is not {TEST_GROUP}"
+    deleted = await session.delete(
+        f"/groups/{group_id}/delete", label=f"c-group-{group_id}", may_fail=True
+    )
+    statuses.append(deleted.status)
+    if deleted.status == HTTPStatus.NOT_FOUND:
+        return True, "it was already gone"
+    return deleted.ok, f"DELETE answered {deleted.status}"
+
+
+def _cleanup_findings(session: Session, statuses: dict[str, list[int]]) -> None:
+    """Record what removal itself turned out to be — the spec is wrong about part of it."""
+    if statuses["campaign"]:
+        seen = sorted(set(statuses["campaign"]))
+        session.finding(
+            "DELETE /campaigns/{id} archives a campaign and answers 201, alone in this API",
+            "confirmed" if seen == [int(HTTPStatus.CREATED)] else "refuted",
+            f"it answered {seen}",
+        )
+    if statuses["stream"]:
+        seen = sorted(set(statuses["stream"]))
+        session.finding(
+            "DELETE /streams/{id} answers 200 and takes the flow out of its campaign",
+            "confirmed" if seen == [int(HTTPStatus.OK)] else "refuted",
+            f"it answered {seen}",
+        )
+    if statuses["group"]:
+        seen = sorted(set(statuses["group"]))
+        session.finding(
+            "The test group can be deleted once the campaigns inside it are archived",
+            "confirmed" if all(code < HTTPStatus.BAD_REQUEST for code in seen) else "refuted",
+            f"DELETE /groups/{{id}}/delete answered {seen}",
+        )
+
+
+async def probe_cleanup(session: Session) -> None:
+    """Take back what the writing probes made, in the order the tracker will accept it."""
+    entries = session.read_ledger()
+    pending = [entry for entry in entries if not entry.get("removed_at")]
+    if not pending:
+        print(f"    nothing left in {LEDGER.name}: there is nothing to take back")
+        return
+    print(f"    {_count(len(pending), 'row')} to remove, oldest first")
+
+    ours = {
+        found
+        for found in (_ledger_id(entry) for entry in entries if entry.get("kind") == "campaign")
+        if found is not None
+    }
+    statuses: dict[str, list[int]] = {kind: [] for kind in LEDGER_KINDS}
+    for kind in LEDGER_KINDS:
+        for entry in [row for row in pending if row.get("kind") == kind]:
+            if kind == "stream":
+                gone, note = await _remove_stream(session, entry, ours, statuses[kind])
+            elif kind == "campaign":
+                gone, note = await _remove_campaign(session, entry, statuses[kind])
+            else:
+                gone, note = await _remove_group(session, entry, statuses[kind])
+            mark = "-" if gone else "!"
+            print(f"    {mark} {kind} {entry.get('id')} {_ledger_name(entry)!r}: {note}")
+            if gone:
+                entry["removed_at"] = _stamp()
+                entry["removed_note"] = note
+                # Written per entity, like record_created and for the same reason: what has
+                # already been taken back must not be attempted twice after a crash.
+                session.write_ledger(entries)
+
+    _cleanup_findings(session, statuses)
+    left = [entry for entry in session.read_ledger() if not entry.get("removed_at")]
+    if left:
+        print(f"    {_count(len(left), 'row')} left in the ledger; the lines above say why")
+    print(
+        "    archived is not deleted. The archive is emptied by POST /campaigns/clean_archive, "
+        "which empties ALL of it — campaigns this project never touched included. That is an "
+        "operator's decision, made in the tracker, and this script will not make it."
+    )
+
+
 def _report_rows(observation: Observation) -> list[dict[str, Any]]:
     """Return a report's rows, which arrive under `rows` rather than at the top level."""
     raw = _field(observation, "rows")
@@ -1443,6 +1602,7 @@ WRITE_PROBES: Final = {
     "create": probe_create,
     "put-semantics": probe_put_semantics,
     "name-limit": probe_name_limit,
+    CLEANUP: probe_cleanup,
 }
 ALL_PROBES: Final = {**PROBES, **WRITE_PROBES}
 
@@ -1492,10 +1652,12 @@ async def _run(settings: Settings, names: tuple[str, ...], options: Options) -> 
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"tracker: {settings.keitaro_base_url}")
     print(f"dumps:   {run_dir}")
-    writing = [name for name in names if name in WRITE_PROBES]
-    if writing:
-        print(f"writing: {', '.join(writing)} — what they create is named {TEST_GROUP}*, goes")
-        print(f"         into the {TEST_GROUP} group, and is listed in {LEDGER} for 2.7")
+    creating = [name for name in names if name in WRITE_PROBES and name != CLEANUP]
+    if creating:
+        print(f"writing: {', '.join(creating)} — what they create is named {TEST_GROUP}*, goes")
+        print(f"         into the {TEST_GROUP} group, and is listed in {LEDGER}")
+    if CLEANUP in names:
+        print(f"cleanup: removes what {LEDGER} lists, and refuses anything it does not")
 
     async with httpx.AsyncClient(
         base_url=str(settings.keitaro_base_url),

@@ -142,6 +142,14 @@ for anyone who reads it literally.
 |---|---|---|
 | A campaign name of 200 characters is accepted whole | pending | |
 
+### `cleanup` — taking it back (writes)
+
+| Claim | Verdict | Evidence |
+|---|---|---|
+| DELETE /streams/{id} answers 200 and takes the flow out of its campaign | pending | |
+| DELETE /campaigns/{id} archives a campaign and answers 201, alone in this API | pending | |
+| The test group can be deleted once the campaigns inside it are archived | pending | |
+
 ## 4. What hangs on which answer
 
 Four of the rows above change the design rather than a line of code. They are the reason
@@ -174,6 +182,7 @@ make probe P="catalogues"     # confirm action_type and the geo filter name firs
 make probe P="create"         # part 1, rehearsed
 make probe P="put-semantics"  # the key question
 make probe P="name-limit"
+make probe P="cleanup"        # take it all back
 ```
 
 Everything a writing probe creates is named `ADROBOT-TEST*`, belongs to the `ADROBOT-TEST`
@@ -182,5 +191,14 @@ request and response bodies are dumped under `.scratch/kt-probe/<run>/`, which
 `.gitignore` covers because a campaign object carries a Click API token; what reaches the
 terminal has been through the service's own redactor.
 
-Cleaning up is not a matter of calling `DELETE`: per §2 it archives rather than deletes,
-answers 201, and the archive is emptied separately with `POST /campaigns/clean_archive`.
+`cleanup` takes it back from the ledger and from nothing else: flows first, then
+campaigns, then the group. A flow is removed only after being read and found on a campaign
+the ledger itself created, and a campaign only if its recorded name begins with
+`ADROBOT-TEST` — a ledger is a file, and a file can be edited by hand. Each removal is
+written back as it happens, so the probe is safe to interrupt and safe to re-run; anything
+it refuses stays in the ledger with the reason beside it.
+
+What it will not do is empty the archive. Per §2 a delete here is an archive, and the only
+way to empty one is `POST /campaigns/clean_archive`, which empties **all** of it —
+campaigns this project never touched included. That is an operator's decision, made in the
+tracker, and the script does not make it.
