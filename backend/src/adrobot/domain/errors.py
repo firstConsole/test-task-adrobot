@@ -7,7 +7,10 @@ length: these are raised on user input and end up in a log and in an HTTP body.
 
 from __future__ import annotations
 
-from typing import Final
+from typing import TYPE_CHECKING, Final
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 
 _CLIP_LENGTH: Final = 32
 
@@ -50,3 +53,25 @@ class InvalidCampaignAliasError(DomainError):
         super().__init__(
             f"campaign alias must be lowercase letters, digits and dashes: {clip(value)}"
         )
+
+
+class OfferNotInStreamError(DomainError):
+    """An operation named an offer that is not among the stream's rows."""
+
+    def __init__(self, offer_id: object) -> None:
+        super().__init__(f"this stream has no row for offer {clip(offer_id)}")
+
+
+class DuplicateOfferRowError(DomainError):
+    """One offer twice in one stream, which the tracker's own unique key forbids."""
+
+    def __init__(self, offer_ids: Iterable[int]) -> None:
+        listed = ", ".join(str(offer_id) for offer_id in sorted(offer_ids))
+        super().__init__(f"a stream cannot carry the same offer twice: {listed}")
+
+
+class PinnedSharesExceedTotalError(DomainError):
+    """Pinned rows reserve more than the whole, so there is nothing left to divide."""
+
+    def __init__(self, reserved: int) -> None:
+        super().__init__(f"pinned rows reserve {reserved}%, which is more than the whole stream")
