@@ -30,6 +30,7 @@ htmlcov/
 .dmypy.json
 dmypy.json
 .ruff_cache/
+.import_linter_cache/
 
 # Node and the frontend (arrives at stage 9)
 node_modules/
