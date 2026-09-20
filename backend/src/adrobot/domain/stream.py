@@ -27,9 +27,10 @@ mirror of somebody else's data is tolerant.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 
 from adrobot.domain.diff import DesiredOffer
 from adrobot.domain.errors import DuplicateOfferRowError
@@ -56,8 +57,13 @@ class StreamType(Enum):
     DEFAULT = "default"
 
 
-class FilterMode(Enum):
-    """Whether a filter lets the click through or turns it away."""
+class FilterMode(StrEnum):
+    """Whether a filter lets the click through or turns it away.
+
+    A `StrEnum` and not an `Enum`, because `StreamFilter.mode` below is typed `str` and
+    these two are the values this service ever *writes*. Reading is another matter: see
+    there.
+    """
 
     ACCEPT = "accept"
     REJECT = "reject"
@@ -70,10 +76,17 @@ class StreamFilter:
     `id` travels back on an update on purpose: the write schema says to provide it when
     updating a filter, so resending it edits the filter in place instead of leaving a
     tracker that merges arrays with two copies of the same condition.
+
+    `mode` is a `str` and not the `FilterMode` beside it, which is the one place this file
+    reads more loosely than it writes. Nothing here branches on a filter's mode — a filter
+    is carried from the tracker and handed straight back to it — so a mode this build has
+    never heard of costs nothing to pass through, while refusing one would make a campaign
+    somebody else built impossible to open. `FilterMode` is what a filter of ours is
+    written with.
     """
 
     name: str
-    mode: FilterMode
+    mode: str
     payload: tuple[str, ...] = ()
     id: int | None = None
 
@@ -124,7 +137,10 @@ class StreamSpec:
     position: int | None = None
     weight: float | None = None
     state: str = "active"
-    action_payload: str | None = None
+    # `string | object` on the wire, and carried as both. A redirect flow's payload is a
+    # URL, while some action types keep a structured one — and a push that could not give
+    # back what it was given would quietly reset it.
+    action_payload: str | Mapping[str, object] | None = None
     collect_clicks: bool = True
     filter_or: bool = False
     comments: str | None = None
@@ -153,7 +169,7 @@ class Stream:
     position: int | None = None
     weight: float | None = None
     state: str = "active"
-    action_payload: str | None = None
+    action_payload: str | Mapping[str, object] | None = None
     collect_clicks: bool = True
     filter_or: bool = False
     comments: str | None = None

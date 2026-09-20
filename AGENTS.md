@@ -176,6 +176,12 @@ assume.
   has wrapped them in `SecretStr` yet. That is why `UnknownSettingError` and
   `MissingSettingError` inherit `Exception`, and why the validator unbinds its argument
   before raising.
+* `str(ValidationError)` renders `input_value=` for every error it reports. Under this
+  project that input is either the settings dict or a tracker response, both of which
+  carry a secret, so neither `settings.py` nor `infrastructure/keitaro/mapping.py` lets
+  one reach a message: the mapper rebuilds it from `exc.errors()` using the location and
+  the message alone.
+
 * `httpx.Headers.__repr__` obfuscates `authorization`, `proxy-authorization` and
   `cookie`, and prints every other header in full. Keitaro authenticates with `Api-Key`,
   so a `Request` or a `Headers` object in a traceback — or in a log line — prints the
