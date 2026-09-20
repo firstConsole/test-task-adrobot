@@ -49,7 +49,9 @@ ignore_imports =
   adrobot.domain.** -> datetime
   adrobot.domain.** -> enum
   adrobot.domain.** -> re
+  adrobot.domain.** -> types
   adrobot.domain.** -> typing
+  adrobot.domain.** -> unicodedata
   adrobot.domain.** -> uuid
   adrobot.domain -> __future__
 # The default (error) would fail the run for every granted module that domain/ does
