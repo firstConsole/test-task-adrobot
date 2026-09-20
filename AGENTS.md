@@ -89,6 +89,10 @@ advertising budget.
   prints through `redact`. It is also the one file outside `src/adrobot/` that unwraps
   the admin key: the containment test scans the package, and a probe has to
   authenticate somehow.
+* **A probe that writes has to be named on the command line**, so a bare run of the script
+  cannot create anything. What one creates carries the `ADROBOT-TEST` prefix, belongs to
+  the `ADROBOT-TEST` campaign group and is appended to `/.scratch/kt-probe/created.json` —
+  the ledger the tracker is cleaned up from.
 * Never log a Keitaro response body on 2xx. On a non-2xx, pass it through
   `adrobot.logging.redact` first — Keitaro returns a campaign's Click API token inside the
   campaign object.

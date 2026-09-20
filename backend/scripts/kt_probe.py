@@ -1,4 +1,4 @@
-"""One-off reconnaissance against a live Keitaro tracker. Sub-stage 2.1: read-only.
+"""One-off reconnaissance against a live Keitaro tracker: what the specification cannot say.
 
 The published specification (`docs/keitaro-openapi.json`) says what the endpoints are;
 stage 2 asks the tracker how they behave. This file is the instrument and
@@ -8,8 +8,16 @@ request that produced it.
 
 Why it is shaped the way it is:
 
-*   **Every call in this sub-stage is a GET.** The writing probes arrive at 2.2, in their
-    own commit, confined to the `ADROBOT-TEST` campaign group and cleaned up at 2.7.
+*   **Reading and writing are separate registries.** A bare run, and `make probe`, does
+    the read-only probes and nothing else; a writing probe has to be named. What one
+    creates carries the `ADROBOT-TEST` prefix, belongs to the `ADROBOT-TEST` campaign
+    group and is appended to `/.scratch/kt-probe/created.json` — the ledger 2.7 deletes
+    from, kept outside the per-run directory so that an interrupted run still leaves one
+    list of everything this script has ever made on this tracker.
+*   **A request body is printed before it is sent**, so what reached somebody's live
+    tracker is in the terminal and in the dump, not inferred from the outcome. Nothing is
+    retried: a creating POST that times out has an unknown outcome, and guessing is how
+    two campaigns get made (§3.1).
 *   **Raw answers are written to `.scratch/`, never to the terminal.** Keitaro returns a
     campaign's Click API token inside a campaign object and a postback URL inside a
     traffic source, which is why `/.scratch/` is in `.gitignore`. What reaches stdout goes
@@ -24,8 +32,9 @@ Why it is shaped the way it is:
     key — `tests/test_secret_containment.py` scans the package, and the key has to reach
     an `Api-Key` header somehow.
 
-    make probe                 # every probe, against the .env at the repository root
+    make probe                 # every read-only probe, with the .env at the root
     make probe P="offers"      # one of them
+    make probe P="create"      # the part 1 rehearsal — this one writes
     cd backend && poetry run python scripts/kt_probe.py --help
 """
 
@@ -38,6 +47,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -61,15 +71,48 @@ SCRATCH_ROOT: Final = REPO_ROOT / ".scratch" / "kt-probe"
 TIMEOUT: Final = httpx.Timeout(connect=3.0, read=30.0, write=10.0, pool=5.0)
 SERVICE_READ_TIMEOUT_MS: Final = 10_000
 
-# The group every writing probe from 2.2 onwards stays inside. Named here because 2.1 is
-# what reports whether it already exists.
+# The group every writing probe stays inside, and the ledger of what they have made. The
+# ledger sits beside the run directories rather than in one of them: cleanup that can only
+# see its own run is how test data survives on somebody's tracker.
 TEST_GROUP: Final = "ADROBOT-TEST"
+LEDGER: Final = SCRATCH_ROOT / "created.json"
+
+# The shape part 1 has to produce, from the task: flow 1 catches one country and redirects
+# to Google, flow 2 rotates offers. `country` is Keitaro's own filter name — the
+# `catalogues` probe prints the catalogue it comes from.
+GOOGLE_URL: Final = "https://google.com"
+GEO_FILTER: Final = "country"
+DEFAULT_GEO: Final = "MX"
+# Keitaro's own key for an HTTP redirect. Overridable, because the catalogue it comes from
+# is `/streams_actions` and this is the one value in the writing probe that is a guess.
+DEFAULT_ACTION_TYPE: Final = "http"
+FLOW_ONE: Final = "Flow 1"
+FLOW_TWO: Final = "Flow 2"
+
+# Question 8: a name long enough to find the limit, sent whole so the answer is either the
+# limit itself or "longer than this".
+LONG_NAME_LENGTH: Final = 200
 
 ROWS_SHOWN: Final = 10
 CELL_WIDTH: Final = 30
 BODY_PREVIEW: Final = 400
 
 Verdict = Literal["confirmed", "refuted", "open"]
+
+
+def _stamp() -> str:
+    """Return the UTC stamp that names a run directory and every entity a run creates."""
+    return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+@dataclass(frozen=True, slots=True)
+class Options:
+    """What the command line asked for, in the one object the probes read it from."""
+
+    rows_shown: int
+    geo: str
+    offer_id: int | None
+    action_type: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +135,7 @@ class Observation:
     elapsed_ms: int
     headers: dict[str, str]
     body: object
+    sent: object | None
 
 
 def _decode(response: httpx.Response) -> object:
@@ -107,6 +151,34 @@ def _rows(observation: Observation) -> list[dict[str, Any]]:
     if not isinstance(observation.body, list):
         return []
     return [row for row in observation.body if isinstance(row, dict)]
+
+
+def _field(observation: Observation, name: str) -> object:
+    """Return one field of an object body, or None when the answer was not an object."""
+    return observation.body.get(name) if isinstance(observation.body, dict) else None
+
+
+def _int_field(observation: Observation, name: str) -> int | None:
+    value = _field(observation, name)
+    return value if isinstance(value, int) else None
+
+
+def _named(rows: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
+    return next((row for row in rows if row.get("name") == name), None)
+
+
+def _payload_values(raw: object) -> list[str]:
+    """Return a stream filter's payload as a list, whichever of the two shapes it arrived in.
+
+    The spec types `Filter.payload` as a string while `FilterStreamRequest.payload` is an
+    array of strings, so the mapper at 4.6 has to survive both. Which one this build sends
+    back is question 5's other half, and the finding says so.
+    """
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    if isinstance(raw, str):
+        return [part.strip() for part in raw.replace("\n", ",").split(",") if part.strip()]
+    return []
 
 
 def _shape(body: object) -> str:
@@ -155,30 +227,92 @@ def _print_rows(rows: list[dict[str, Any]], columns: tuple[str, ...], *, limit: 
         print(f"    ... and {len(rows) - len(shown)} more (all of them are in the dump)")
 
 
+def _print_values(observation: Observation, *, limit: int) -> None:
+    """Print a list of scalars: some catalogues answer with bare strings, not objects."""
+    body = observation.body
+    if not isinstance(body, list) or not body or any(isinstance(item, dict) for item in body):
+        return
+    shown = [str(item) for item in body[:limit]]
+    tail = f" ... and {len(body) - len(shown)} more" if len(body) > len(shown) else ""
+    print(f"    {', '.join(shown)}{tail}")
+
+
 class Session:
     """Everything a probe is handed: the client, the dump directory and the run's tally."""
 
-    def __init__(self, client: httpx.AsyncClient, dump_dir: Path, *, rows_shown: int) -> None:
+    def __init__(self, client: httpx.AsyncClient, dump_dir: Path, options: Options) -> None:
         self._client = client
         self._dump_dir = dump_dir
-        self.rows_shown = rows_shown
+        self.options = options
         self.calls = 0
         self.arrays = 0
+        self.listings = 0
         self.successes = 0
+        self.expected_failures = 0
+        self.test_group_id: int | None = None
         self.redirects: list[str] = []
         self.failures: list[str] = []
         self.findings: list[Finding] = []
 
     async def get(
-        self, path: str, *, label: str, params: dict[str, Any] | None = None
+        self,
+        path: str,
+        *,
+        label: str,
+        params: dict[str, Any] | None = None,
+        listing: bool = True,
+        may_fail: bool = False,
     ) -> Observation:
-        """Perform one GET, dump the raw answer, print a redacted line about it.
+        """Read one endpoint. `listing=False` says this one answers with a single object.
+
+        Only listings are counted towards the "bare JSON array" finding: `GET /offers/{id}`
+        returning an object is not evidence against it.
+        """
+        observation = await self._request(
+            "GET", path, label=label, params=params, may_fail=may_fail
+        )
+        if listing and observation.ok:
+            self.listings += 1
+            if isinstance(observation.body, list):
+                self.arrays += 1
+        return observation
+
+    async def post(
+        self, path: str, *, label: str, payload: dict[str, Any], may_fail: bool = False
+    ) -> Observation:
+        """Create something. Never retried on a timeout: the outcome of one is unknown."""
+        return await self._request("POST", path, label=label, payload=payload, may_fail=may_fail)
+
+    async def put(self, path: str, *, label: str, payload: dict[str, Any]) -> Observation:
+        """Replace something. The body always carries `action_type` and `schema` (§3.1)."""
+        return await self._request("PUT", path, label=label, payload=payload)
+
+    async def _request(  # noqa: PLR0913 — six axes of one HTTP call, not six concerns
+        self,
+        method: str,
+        path: str,
+        *,
+        label: str,
+        params: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
+        may_fail: bool = False,
+    ) -> Observation:
+        """Perform one call, dump both halves of it, print a redacted line about it.
+
+        `may_fail` marks a call whose refusal is the answer it went looking for — a filter
+        the endpoint may not accept, a path that may not exist. It is still printed and
+        still dumped; it is not counted as something that went wrong, because a run that
+        exits non-zero every time is a run nobody reads the exit code of.
 
         A leading slash on `path` does not reset the `/admin_api/v1` prefix: httpx merges
         it onto the client's base path, unlike `urljoin`, which would discard it.
         """
+        if payload is not None:
+            # Printed whole and before the fact: this is the one file that changes somebody
+            # else's tracker, and "what did it send" must not be a question for the dump.
+            print(f"  {method} {path} <- {json.dumps(redact(payload), ensure_ascii=False)}")
         started = time.perf_counter()
-        response = await self._client.get(path, params=params)
+        response = await self._client.request(method, path, params=params, json=payload)
         # Timed here rather than read off `response.elapsed`: httpx stamps that when the
         # response stream closes, and a body that was never streamed — a mocked answer in
         # a smoke run — leaves the attribute unset and the probe raising instead of
@@ -186,37 +320,56 @@ class Session:
         # number the offer-catalogue finding below is about.
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         observation = Observation(
-            method="GET",
+            method=method,
             path=response.request.url.raw_path.decode(),
             status=response.status_code,
             ok=response.is_success,
             elapsed_ms=elapsed_ms,
             headers=dict(response.headers),
             body=_decode(response),
+            sent=payload,
         )
         self.calls += 1
         dump = self._dump(label, observation)
 
         print(
-            f"  GET {observation.path} -> {observation.status} "
+            f"  {method} {observation.path} -> {observation.status} "
             f"in {observation.elapsed_ms} ms, {_shape(observation.body)}  [{dump}]"
         )
-        if isinstance(observation.body, list):
-            self.arrays += 1
         if response.is_redirect:
             self.redirects.append(f"{observation.path} -> {observation.status}")
             print(f"    ! redirect to {response.headers.get('location', '(no Location)')}")
         if observation.ok:
             self.successes += 1
         else:
-            self.failures.append(f"GET {observation.path} -> {observation.status}")
             preview = json.dumps(redact(observation.body), ensure_ascii=False, default=repr)
             print(f"    ! body: {preview[:BODY_PREVIEW]}")
+            if may_fail:
+                self.expected_failures += 1
+            else:
+                self.failures.append(f"{method} {observation.path} -> {observation.status}")
         return observation
 
     def finding(self, claim: str, verdict: Verdict, evidence: str) -> None:
         """Record what the tracker did about a claim, in the words 2.6 will quote."""
         self.findings.append(Finding(claim=claim, verdict=verdict, evidence=evidence))
+
+    def record_created(self, kind: str, entity_id: object, name: str) -> None:
+        """Append one created entity to the ledger, before anything else can go wrong.
+
+        Written on every call rather than once at the end: the entity exists on the tracker
+        from the moment the POST answered, so a crash between that and the end of the run
+        must not be what makes it unfindable.
+        """
+        LEDGER.parent.mkdir(parents=True, exist_ok=True)
+        entries: list[dict[str, object]] = []
+        if LEDGER.exists():
+            loaded = json.loads(LEDGER.read_text(encoding="utf-8"))
+            if isinstance(loaded, list):
+                entries = [row for row in loaded if isinstance(row, dict)]
+        entries.append({"kind": kind, "id": entity_id, "name": name, "at": _stamp()})
+        LEDGER.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"    + created {kind} {entity_id}: {name!r} — in the ledger, {len(entries)} so far")
 
     def write_findings(self) -> Path:
         """Write the findings beside the dumps, so a run survives a closed terminal."""
@@ -237,7 +390,7 @@ class Session:
 async def probe_groups(session: Session) -> None:
     """Read the campaign groups, and settle whether `type` is required or merely defaulted."""
     typed = await session.get("/groups", label="groups-campaigns", params={"type": "campaigns"})
-    _print_rows(_rows(typed), ("id", "name", "position", "type"), limit=session.rows_shown)
+    _print_rows(_rows(typed), ("id", "name", "position", "type"), limit=session.options.rows_shown)
 
     present = TEST_GROUP in {str(row.get("name")) for row in _rows(typed)}
     print(f"    {TEST_GROUP}: {'present' if present else 'absent — 2.2 creates it'}")
@@ -245,7 +398,7 @@ async def probe_groups(session: Session) -> None:
     # The spec marks `type` required *and* gives it a default, which is a contradiction
     # only the tracker can settle: that pair is how a generator writes "optional" when the
     # form it was generated from had a value preselected.
-    untyped = await session.get("/groups", label="groups-no-type")
+    untyped = await session.get("/groups", label="groups-no-type", may_fail=True)
     claim = "GET /groups rejects a request without the `type` parameter"
     if not untyped.ok:
         session.finding(
@@ -274,7 +427,9 @@ async def probe_sources(session: Session) -> None:
     # `postback_url` and `parameters` are deliberately not among the columns: a postback
     # URL carries the tracker's own token. They are in the dump, which is gitignored.
     sources = await session.get("/traffic_sources", label="traffic-sources")
-    _print_rows(_rows(sources), ("id", "name", "template_name", "state"), limit=session.rows_shown)
+    _print_rows(
+        _rows(sources), ("id", "name", "template_name", "state"), limit=session.options.rows_shown
+    )
 
 
 async def probe_domains(session: Session) -> None:
@@ -284,7 +439,7 @@ async def probe_domains(session: Session) -> None:
     _print_rows(
         rows,
         ("id", "name", "is_ssl", "state", "default_campaign_id", "catch_not_found"),
-        limit=session.rows_shown,
+        limit=session.options.rows_shown,
     )
     if rows:
         active = [row for row in rows if row.get("state") == "active"]
@@ -299,7 +454,7 @@ async def probe_offers(session: Session) -> None:
     _print_rows(
         rows,
         ("id", "name", "country", "state", "group_id", "action_type"),
-        limit=session.rows_shown,
+        limit=session.options.rows_shown,
     )
     print(f"    {len(rows)} offers in {full.elapsed_ms} ms")
 
@@ -310,6 +465,7 @@ async def probe_offers(session: Session) -> None:
         "/offers",
         label="offers-with-query",
         params={"limit": 1, "search": "zzz-no-such-offer"},
+        may_fail=True,
     )
     claim = "GET /offers takes no query parameters, so the catalogue has to be mirrored locally"
     if not narrowed.ok:
@@ -339,22 +495,375 @@ async def probe_offers(session: Session) -> None:
         )
 
 
+async def probe_catalogues(session: Session) -> None:
+    """Read the flow catalogues a writing probe takes its action and filter names from."""
+    actions = await session.get("/streams_actions", label="streams-actions")
+    _print_rows(_rows(actions), ("key", "name", "field", "type"), limit=session.options.rows_shown)
+    _print_values(actions, limit=session.options.rows_shown)
+
+    # The spec says /streams_actions; two published clients say /stream_actions. One of
+    # them is writing against a path this tracker does not have, and it is cheaper to find
+    # out here than while reading someone else's adapter at 4.5.
+    singular = await session.get("/stream_actions", label="stream-actions-singular", may_fail=True)
+    session.finding(
+        "The action catalogue is /streams_actions; /stream_actions does not exist",
+        "confirmed" if actions.ok and not singular.ok else "refuted",
+        f"/streams_actions: {actions.status}, /stream_actions: {singular.status}",
+    )
+
+    for path, label, columns in (
+        ("/stream_schemas", "stream-schemas", ("key", "name")),
+        ("/stream_types", "stream-types", ("key", "name")),
+    ):
+        listed = await session.get(path, label=label)
+        _print_rows(_rows(listed), columns, limit=session.options.rows_shown)
+        _print_values(listed, limit=session.options.rows_shown)
+
+    filters = await session.get("/stream_filters", label="stream-filters")
+    _print_rows(_rows(filters), ("value", "group", "tooltip"), limit=session.options.rows_shown)
+    if filters.ok:
+        known = {str(row.get("value")) for row in _rows(filters)}
+        related = sorted(name for name in known if "country" in name or "geo" in name)
+        session.finding(
+            f"The filter a geo flow is built with is named {GEO_FILTER!r}",
+            "confirmed" if GEO_FILTER in known else "refuted",
+            f"{len(known)} filters; the country-like ones: {', '.join(related) or 'none'}",
+        )
+
+
+async def _ensure_test_group(session: Session) -> int | None:
+    """Return the id of the ADROBOT-TEST campaign group, creating it on the first run.
+
+    Cached on the session: two writing probes in one run must not each decide the group is
+    missing and create it. A tracker that indexes a new group asynchronously would answer
+    the second read with the old list, and the second create would succeed.
+    """
+    if session.test_group_id is not None:
+        return session.test_group_id
+    listed = await session.get("/groups", label="w-groups", params={"type": "campaigns"})
+    existing = _named(_rows(listed), TEST_GROUP)
+    if existing is not None:
+        found = existing.get("id")
+        print(f"    {TEST_GROUP} group: id={found}")
+        session.test_group_id = found if isinstance(found, int) else None
+        return session.test_group_id
+    created = await session.post(
+        "/groups", label="w-group-create", payload={"name": TEST_GROUP, "type": "campaigns"}
+    )
+    if not created.ok:
+        print(f"    {TEST_GROUP} could not be created; nothing else in this probe can run")
+        return None
+    group_id = _int_field(created, "id")
+    session.record_created("group", group_id, TEST_GROUP)
+    session.test_group_id = group_id
+    return group_id
+
+
+async def _pick(session: Session, path: str, *, label: str, what: str) -> dict[str, Any] | None:
+    """Return the first usable row of a reference list, naming the one it took.
+
+    A row with no `state` counts as usable: not every reference object in this API has
+    one, and skipping those would leave a campaign without a domain for no reason.
+    """
+    listed = await session.get(path, label=label)
+    usable = [row for row in _rows(listed) if row.get("state") in (None, "active")]
+    if not usable:
+        print(f"    no usable {what}; the campaign is created without one")
+        return None
+    chosen = usable[0]
+    print(f"    {what}: id={chosen.get('id')} {str(chosen.get('name'))!r}")
+    return chosen
+
+
+async def _pick_offer(session: Session) -> int | None:
+    """Return the offer flow 2 rotates: the one asked for, or the first active one."""
+    wanted = session.options.offer_id
+    if wanted is None:
+        chosen = await _pick(session, "/offers", label="w-offers", what="offer")
+        found = chosen.get("id") if chosen is not None else None
+        return found if isinstance(found, int) else None
+    looked_up = await session.get(f"/offers/{wanted}", label="w-offer", listing=False)
+    if not looked_up.ok:
+        print(f"    offer {wanted} could not be read; flow 2 would have nothing to rotate")
+        return None
+    print(f"    offer: id={wanted} {str(_field(looked_up, 'name'))!r}")
+    return wanted
+
+
+def _campaign_findings(session: Session, campaign: Observation, payload: dict[str, Any]) -> None:
+    """Record what the create itself said: its status, its group_id and its token."""
+    session.finding(
+        "Creating a campaign answers 200, not 201",
+        "confirmed" if campaign.status == HTTPStatus.OK else "refuted",
+        f"POST /campaigns answered {campaign.status}",
+    )
+    echoed = _field(campaign, "group_id")
+    session.finding(
+        "A campaign takes group_id as a string and reads it back as an integer",
+        "confirmed" if isinstance(echoed, int) else "refuted",
+        f"sent {payload['group_id']!r}, read back {echoed!r} ({type(echoed).__name__})",
+    )
+    if isinstance(campaign.body, dict):
+        session.finding(
+            "A created campaign carries the Click API token, so no 2xx body may be logged",
+            "confirmed" if "token" in campaign.body else "refuted",
+            f"the created object has the keys: {', '.join(sorted(campaign.body))}",
+        )
+
+
+async def _action_payload_finding(
+    session: Session, flow: dict[str, Any], sent: dict[str, Any]
+) -> None:
+    """Answer question 3, and try the fallback part 1 would need if the answer is bad."""
+    claim = "POST /streams stores action_payload, although no request schema declares it"
+    if flow.get("action_payload") == GOOGLE_URL:
+        session.finding(claim, "confirmed", f"{FLOW_ONE} read back with the URL it was made with")
+        return
+    session.finding(
+        claim,
+        "refuted",
+        f"read back as {flow.get('action_payload')!r}: part 1 would need POST then PUT",
+    )
+    stream_id = flow.get("id")
+    if not isinstance(stream_id, int):
+        return
+    # The two-step part 1 would fall back to. The body resends `action_type` and `schema`
+    # because nothing promises that PUT is partial — the same rule 4.5 will follow.
+    repaired = await session.put(
+        f"/streams/{stream_id}",
+        label="w-flow-one-put",
+        payload={**sent, "action_payload": GOOGLE_URL},
+    )
+    after = await session.get(f"/streams/{stream_id}", label="w-flow-one-after", listing=False)
+    session.finding(
+        "PUT /streams/{id} sets the action_payload that POST dropped",
+        "confirmed" if _field(after, "action_payload") == GOOGLE_URL else "refuted",
+        f"PUT answered {repaired.status}; the flow then read back "
+        f"{_field(after, 'action_payload')!r}",
+    )
+
+
+def _filter_findings(session: Session, flow: dict[str, Any]) -> None:
+    """Answer question 5: what a geo filter looks like coming back out of the tracker."""
+    raw = flow.get("filters")
+    filters = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    geo = next((item for item in filters if item.get("name") == GEO_FILTER), None)
+    if geo is None:
+        session.finding(
+            f"A {GEO_FILTER!r} filter sent with the create survives it",
+            "refuted",
+            f"the flow read back with {len(filters)} filters, none of them {GEO_FILTER!r}",
+        )
+        return
+    session.finding(
+        "A stream filter's payload comes back in the shape it was sent, an array",
+        "confirmed" if isinstance(geo.get("payload"), list) else "refuted",
+        f"payload came back as a {type(geo.get('payload')).__name__}",
+    )
+    values = _payload_values(geo.get("payload"))
+    sent = session.options.geo
+    claim = "Keitaro keeps a geo filter's payload in the case it was sent"
+    if values == [sent]:
+        session.finding(claim, "confirmed", f"sent [{sent!r}], read back the same")
+    elif [value.casefold() for value in values] == [sent.casefold()]:
+        session.finding(
+            claim, "refuted", f"sent [{sent!r}], read back {values}: compare geo case-insensitively"
+        )
+    else:
+        session.finding(claim, "refuted", f"sent [{sent!r}], read back {values}")
+
+
+def _offer_findings(session: Session, flow: dict[str, Any]) -> None:
+    """Answer question 9: whether one read per campaign is enough to draw the editor."""
+    raw = flow.get("offers")
+    offers = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    claim = "GET /campaigns/{id}/streams nests each flow's offers as whole objects"
+    if not offers:
+        session.finding(
+            claim,
+            "refuted",
+            f"{FLOW_TWO} read back with offers as {type(raw).__name__}: the editor screen "
+            f"would need one more read per flow",
+        )
+        return
+    keys = sorted(offers[0])
+    session.finding(claim, "confirmed", f"offers[0] has the keys: {', '.join(keys)}")
+    session.finding(
+        "A stream offer row carries its own id and created_at, which the tie-break reads",
+        "confirmed" if {"id", "created_at"} <= set(keys) else "refuted",
+        f"offers[0] has the keys: {', '.join(keys)}",
+    )
+
+
+async def _read_back(session: Session, campaign_id: int, flow_one: dict[str, Any]) -> None:
+    """Read the campaign's flows back, which is where questions 3, 5 and 9 are answered."""
+    streams = await session.get(f"/campaigns/{campaign_id}/streams", label="w-streams")
+    rows = _rows(streams)
+    _print_rows(
+        rows,
+        ("id", "name", "schema", "action_type", "position", "state"),
+        limit=session.options.rows_shown,
+    )
+    first = _named(rows, FLOW_ONE)
+    second = _named(rows, FLOW_TWO)
+    if first is not None:
+        await _action_payload_finding(session, first, flow_one)
+        _filter_findings(session, first)
+    if second is not None:
+        _offer_findings(session, second)
+
+
+async def probe_create(session: Session) -> None:
+    """Rehearse part 1 end to end: a campaign in ADROBOT-TEST with both of its flows."""
+    group_id = await _ensure_test_group(session)
+    if group_id is None:
+        return
+    domain = await _pick(session, "/domains", label="w-domains", what="domain")
+    source = await _pick(session, "/traffic_sources", label="w-sources", what="traffic source")
+    offer_id = await _pick_offer(session)
+
+    stamp = _stamp()
+    campaign_payload: dict[str, Any] = {
+        "name": f"{TEST_GROUP} 2.2 {stamp}",
+        # Lower case, because an alias becomes the path of a public link; stamped, because
+        # a colliding alias is one of the 406s stage 6 has to tell apart from the others.
+        "alias": f"adrobot-test-{stamp.lower()}",
+        # A string, as CampaignRequest declares it, although a campaign reads its group
+        # back as an integer. If this build wants an integer, the finding says so and 6.2
+        # sends what it wants rather than what the spec says.
+        "group_id": str(group_id),
+        "state": "active",
+    }
+    if domain is not None:
+        campaign_payload["domain_id"] = domain.get("id")
+    if source is not None:
+        campaign_payload["traffic_source_id"] = source.get("id")
+
+    campaign = await session.post("/campaigns", label="w-campaign", payload=campaign_payload)
+    if not campaign.ok:
+        print("    the campaign was refused; there is nothing to hang a flow on")
+        return
+    campaign_id = _int_field(campaign, "id")
+    session.record_created("campaign", campaign_id, str(campaign_payload["name"]))
+    _campaign_findings(session, campaign, campaign_payload)
+    if campaign_id is None:
+        return
+
+    flow_one: dict[str, Any] = {
+        "campaign_id": campaign_id,
+        "type": "regular",
+        "name": FLOW_ONE,
+        "position": 1,
+        "schema": "action",
+        "action_type": session.options.action_type,
+        "action_payload": GOOGLE_URL,
+        "filters": [{"name": GEO_FILTER, "mode": "accept", "payload": [session.options.geo]}],
+    }
+    first = await session.post("/streams", label="w-flow-one", payload=flow_one)
+    if first.ok:
+        session.record_created("stream", _int_field(first, "id"), FLOW_ONE)
+
+    flow_two: dict[str, Any] = {
+        "campaign_id": campaign_id,
+        "type": "regular",
+        "name": FLOW_TWO,
+        "position": 2,
+        "schema": "landings",
+    }
+    if offer_id is not None:
+        flow_two["offers"] = [{"offer_id": offer_id, "share": 100, "state": "active"}]
+    # Sent without `action_type` on purpose: the spec marks it required on POST /streams
+    # even for a flow that performs no action. A second, deliberate attempt after a
+    # definite refusal is not the retry §3.1 forbids — that one is about a request whose
+    # outcome is unknown.
+    second = await session.post("/streams", label="w-flow-two", payload=flow_two, may_fail=True)
+    claim = "POST /streams demands action_type even from a flow that only rotates offers"
+    if second.ok:
+        session.finding(
+            claim, "refuted", f"a flow with no action_type was accepted ({second.status})"
+        )
+    else:
+        session.finding(
+            claim, "confirmed", f"without action_type: {second.status}, so it was resent"
+        )
+        flow_two["action_type"] = session.options.action_type
+        second = await session.post("/streams", label="w-flow-two-retry", payload=flow_two)
+    if second.ok:
+        session.record_created("stream", _int_field(second, "id"), FLOW_TWO)
+
+    await _read_back(session, campaign_id, flow_one)
+
+
+async def probe_name_limit(session: Session) -> None:
+    """Find the length a campaign name is cut at, before a user's title finds it for us."""
+    group_id = await _ensure_test_group(session)
+    if group_id is None:
+        return
+    stamp = _stamp()
+    name = (f"{TEST_GROUP} {stamp} " + "x" * LONG_NAME_LENGTH)[:LONG_NAME_LENGTH]
+    created = await session.post(
+        "/campaigns",
+        label="w-long-name",
+        payload={
+            "name": name,
+            "alias": f"adrobot-test-long-{stamp.lower()}",
+            "group_id": str(group_id),
+            "state": "active",
+        },
+    )
+    claim = f"A campaign name of {LONG_NAME_LENGTH} characters is accepted whole"
+    if not created.ok:
+        session.finding(
+            claim,
+            "refuted",
+            f"POST /campaigns answered {created.status}: the limit is below {LONG_NAME_LENGTH}",
+        )
+        return
+    session.record_created("campaign", _int_field(created, "id"), f"{name[:40]}...")
+    echoed = _field(created, "name")
+    length = len(echoed) if isinstance(echoed, str) else 0
+    if length == LONG_NAME_LENGTH:
+        session.finding(claim, "confirmed", f"it read back at its full {length} characters")
+    else:
+        session.finding(
+            claim,
+            "refuted",
+            f"accepted and silently cut to {length} characters: validate at our own boundary",
+        )
+
+
 PROBES: Final = {
     "groups": probe_groups,
     "sources": probe_sources,
     "domains": probe_domains,
     "offers": probe_offers,
+    "catalogues": probe_catalogues,
 }
+
+# Apart from PROBES and never in the default set: a bare `kt_probe.py` must not create
+# anything on somebody's tracker. Naming one is the whole gate. A prompt would make the
+# script unusable from the Makefile, and a --write flag on top of a name typed on purpose
+# is ceremony rather than a second opinion.
+WRITE_PROBES: Final = {
+    "create": probe_create,
+    "name-limit": probe_name_limit,
+}
+ALL_PROBES: Final = {**PROBES, **WRITE_PROBES}
+
+
+def _summary(probe: object) -> str:
+    """Return a probe's one-line docstring, which is also its line in --help."""
+    return (probe.__doc__ or "").splitlines()[0]
 
 
 def _close_out(session: Session) -> None:
     """Record the two findings that are about the run as a whole rather than one endpoint."""
-    if session.successes:
+    if session.listings:
         session.finding(
-            "Every reference endpoint answers with a bare JSON array: no envelope, no "
-            "pagination metadata",
-            "confirmed" if session.arrays == session.successes else "refuted",
-            f"{session.arrays} of {session.successes} successful reads were top-level arrays",
+            "Every list endpoint answers with a bare JSON array: no envelope, no pagination "
+            "metadata",
+            "confirmed" if session.arrays == session.listings else "refuted",
+            f"{session.arrays} of {session.listings} successful list reads were top-level arrays",
         )
     if session.redirects:
         session.finding(
@@ -382,11 +891,15 @@ def _print_findings(session: Session) -> None:
         print(f"| {finding.claim} | {finding.verdict} | {finding.evidence} |")
 
 
-async def _run(settings: Settings, names: tuple[str, ...], rows_shown: int) -> int:
-    run_dir = SCRATCH_ROOT / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+async def _run(settings: Settings, names: tuple[str, ...], options: Options) -> int:
+    run_dir = SCRATCH_ROOT / _stamp()
     run_dir.mkdir(parents=True, exist_ok=True)
     print(f"tracker: {settings.keitaro_base_url}")
     print(f"dumps:   {run_dir}")
+    writing = [name for name in names if name in WRITE_PROBES]
+    if writing:
+        print(f"writing: {', '.join(writing)} — what they create is named {TEST_GROUP}*, goes")
+        print(f"         into the {TEST_GROUP} group, and is listed in {LEDGER} for 2.7")
 
     async with httpx.AsyncClient(
         base_url=str(settings.keitaro_base_url),
@@ -397,12 +910,12 @@ async def _run(settings: Settings, names: tuple[str, ...], rows_shown: int) -> i
         timeout=TIMEOUT,
         follow_redirects=False,
     ) as client:
-        session = Session(client, run_dir, rows_shown=rows_shown)
+        session = Session(client, run_dir, options)
         # Sequentially, and without the service's semaphore: this points at somebody's
         # working tracker, and the order of the output is what makes it readable.
         for name in names:
-            probe = PROBES[name]
-            print(f"\n== {name}: {(probe.__doc__ or '').splitlines()[0]}")
+            probe = ALL_PROBES[name]
+            print(f"\n== {name}: {_summary(probe)}")
             try:
                 await probe(session)
             except httpx.HTTPError as exc:
@@ -412,20 +925,26 @@ async def _run(settings: Settings, names: tuple[str, ...], rows_shown: int) -> i
 
     _close_out(session)
     _print_findings(session)
-    print(f"\n{session.calls} calls, {len(session.failures)} failed. {session.write_findings()}")
+    asked = f", {session.expected_failures} refused as asked" if session.expected_failures else ""
+    print(
+        f"\n{session.calls} calls, {len(session.failures)} failed{asked}. "
+        f"{session.write_findings()}"
+    )
     for failure in session.failures:
         print(f"  ! {failure}")
     return 1 if session.failures else 0
 
 
-def _parse_args(argv: Sequence[str] | None) -> tuple[tuple[str, ...], int]:
-    listed = "\n".join(
-        f"  {name:8s} {(probe.__doc__ or '').splitlines()[0]}" for name, probe in PROBES.items()
-    )
+def _parse_args(argv: Sequence[str] | None) -> tuple[tuple[str, ...], Options]:
+    reading = "\n".join(f"  {name:11s} {_summary(probe)}" for name, probe in PROBES.items())
+    writing = "\n".join(f"  {name:11s} {_summary(probe)}" for name, probe in WRITE_PROBES.items())
     parser = argparse.ArgumentParser(
         prog="kt_probe.py",
-        description="Read-only reconnaissance against a live Keitaro (stage 2.1).",
-        epilog=f"probes (all of them by default):\n{listed}",
+        description="Reconnaissance against a live Keitaro tracker (stage 2).",
+        epilog=(
+            f"read-only probes, run when none is named:\n{reading}\n\n"
+            f"writing probes, run only when named:\n{writing}"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("probes", nargs="*", metavar="PROBE", help="which probes to run")
@@ -435,17 +954,40 @@ def _parse_args(argv: Sequence[str] | None) -> tuple[tuple[str, ...], int]:
         default=ROWS_SHOWN,
         help=f"rows printed per table; the dump always holds all of them (default {ROWS_SHOWN})",
     )
+    parser.add_argument(
+        "--geo",
+        default=DEFAULT_GEO,
+        help=f"country code for the geo flow the writing probe builds (default {DEFAULT_GEO})",
+    )
+    parser.add_argument(
+        "--offer-id",
+        type=int,
+        default=None,
+        help="offer for flow 2; the first active offer in the catalogue by default",
+    )
+    parser.add_argument(
+        "--action-type",
+        default=DEFAULT_ACTION_TYPE,
+        help=f"action key for the redirect flow, from /streams_actions "
+        f"(default {DEFAULT_ACTION_TYPE})",
+    )
     args = parser.parse_args(argv)
     names: tuple[str, ...] = tuple(args.probes) or tuple(PROBES)
-    unknown = [name for name in names if name not in PROBES]
+    unknown = [name for name in names if name not in ALL_PROBES]
     if unknown:
-        parser.error(f"unknown probe: {', '.join(unknown)}. Known: {', '.join(PROBES)}")
-    return names, int(args.rows)
+        parser.error(f"unknown probe: {', '.join(unknown)}. Known: {', '.join(ALL_PROBES)}")
+    options = Options(
+        rows_shown=int(args.rows),
+        geo=str(args.geo).strip(),
+        offer_id=int(args.offer_id) if args.offer_id is not None else None,
+        action_type=str(args.action_type),
+    )
+    return names, options
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the selected probes and return the exit code: 1 if any call failed, 2 if unconfigured."""
-    names, rows_shown = _parse_args(argv)
+    names, options = _parse_args(argv)
     try:
         settings = Settings()
     except (UnknownSettingError, MissingSettingError) as exc:
@@ -458,7 +1000,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print("repository root: set -a; . .env; set +a — or use `make probe`.", file=sys.stderr)
         return 2
-    return asyncio.run(_run(settings, names, rows_shown))
+    return asyncio.run(_run(settings, names, options))
 
 
 if __name__ == "__main__":

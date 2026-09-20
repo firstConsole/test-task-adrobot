@@ -83,6 +83,10 @@ imports: ## Check the layer boundaries (red until stage 4.2)
 # because a variable exported by one recipe line does not survive into the next, and the
 # file is read here rather than by Settings for the reason AGENTS.md gives: every backend
 # tool runs from backend/ while .env lives one directory up.
+#
+# `make probe` alone only reads. The writing probes — `create`, `name-limit` — have to be
+# named, and what they create carries the ADROBOT-TEST prefix and is listed in
+# .scratch/kt-probe/created.json, which the cleanup at 2.7 works from.
 probe: ## Probe the live Keitaro API (stage 2): make probe P="groups offers"
 	@test -f .env || { echo 'no .env: cp .env.example .env and put the real tracker URL and key in it'; exit 1; }
 	set -a; . ./.env; set +a; cd $(BACKEND) && $(RUN) python scripts/kt_probe.py $(P)
