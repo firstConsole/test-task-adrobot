@@ -1,0 +1,72 @@
+# Three jobs, one per kind of failure, so a red run says which kind without being opened.
+#
+# PLAN-BACKEND §11 describes six. The three that are missing are missing because they
+# cannot pass yet, and a job that is allowed to fail is a job nobody reads:
+#
+#   imports         the three import-linter contracts name adrobot.domain,
+#                   adrobot.application and infrastructure/keitaro/schemas.py. None of
+#                   those packages exists before stage 4, and one erroring contract aborts
+#                   the whole run — so this job joins the workflow in the stage-4 PR.
+#   frontend        there is no frontend/ until stage 9.
+#   compose-smoke   it is specified as "the literal commands from the README", and the
+#                   README is written at 12.1. The stack itself already comes up; what is
+#                   missing is the thing the job is supposed to be checking.
+
+name: CI
+
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Nothing here writes to the repository.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/python-env
+      # Two commands and not `make lint`, so the log says which of the two failed.
+      - name: ruff check
+        working-directory: backend
+        run: poetry run ruff check .
+      - name: ruff format
+        working-directory: backend
+        run: poetry run ruff format --check .
+
+  types:
+    name: types
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/python-env
+      # Covers src, tests and alembic; the file list lives in pyproject.toml so that this
+      # line cannot drift from what a developer runs.
+      - name: mypy
+        working-directory: backend
+        run: poetry run mypy
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/python-env
+      # No `services: postgres` yet. Every test today runs without one, and a service
+      # container nothing connects to is a minute of start-up per run that proves nothing.
+      # Stage 5.9 adds it in the commit that writes the first test needing it.
+      - name: pytest
+        working-directory: backend
+        run: poetry run pytest

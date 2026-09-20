@@ -1,0 +1,41 @@
+# AD Robot monorepo. Editor whitespace rules, kept in agreement with the
+# formatters: `ruff format` on the backend, the two-space toolchain on the front.
+root = true
+
+# Repo-wide default. Two spaces, because most of what lands here is two:
+# TS/TSX, CSS, JSON, YAML (compose, CI workflows), shell, Markdown, .env.example.
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Python, exactly what `ruff format` emits. The ruler matches the
+# [tool.ruff] line-length that sub-stage 1.3 sets.
+[*.py]
+indent_size = 4
+max_line_length = 100
+
+# Configuration owned by the Python side: pyproject.toml, alembic.ini.
+[*.{toml,ini}]
+indent_size = 4
+
+# Recipe lines need a literal tab, or make answers "missing separator".
+# Written before the Makefile itself arrives at sub-stage 1.10.
+[Makefile]
+indent_style = tab
+
+# Two trailing spaces are a hard line break in Markdown, and nothing in this
+# toolchain reformats Markdown — pre-commit runs ruff and gitleaks only.
+[*.md]
+trim_trailing_whitespace = false
+
+# Generated from the OpenAPI schema; CI regenerates it and runs
+# `git diff --exit-code`, so an editor must not touch it on save.
+[**/*.gen.ts]
+indent_style = unset
+indent_size = unset
+insert_final_newline = unset
+trim_trailing_whitespace = unset
