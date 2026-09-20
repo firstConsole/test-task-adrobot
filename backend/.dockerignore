@@ -1,0 +1,44 @@
+# What `docker build backend/` may see. A different file from .gitignore and a different
+# job: .gitignore decides what is committed, this decides what is uploaded to the engine
+# and can therefore reach a layer, or invalidate one.
+#
+# NOT .gitignore semantics. Patterns are anchored at the context root and `*` does not
+# cross `/`, so a bare `__pycache__` — the spelling .gitignore uses — leaves every nested
+# one behind; anything that must match at depth is written `**/`. Negation also runs the
+# other way round: the last matching rule wins and `!` really does pull a path back out of
+# an excluded directory, which is the only reason the allow-list below is legal at all.
+#
+# Deny everything, then name the three build inputs. An allow-list rather than a list of
+# things to skip, because a list of things to skip only ever excludes the ones somebody
+# thought of: it is what makes PLAN-BACKEND §9's ".dockerignore excludes .env" true by
+# construction. The stale backend/.venv, tests/, dist/ and every tool cache are out
+# because nothing names them in.
+#
+# The cost is one line per new build input, paid in the commit that adds it: 1.9 adds
+# `!alembic.ini` and `!alembic` beside the two COPY lines it adds to the Dockerfile, and a
+# forgotten negation is a failing COPY at build rather than a silently empty directory.
+# `!alembic` the directory — a negation naming files inside an excluded directory
+# (`!alembic/**/*.py`) re-includes nothing at all.
+*
+!pyproject.toml
+!poetry.lock
+!src
+
+# src/ is the one directory named back in, and a working tree leaves things inside it that
+# are not source. Not hygiene for its own sake: `poetry build` packages whatever sits
+# beside the modules, so an editor's `settings.py~` is installed into site-packages as a
+# second, complete, greppable copy of the one module that names the tracker key — which is
+# the property tests/test_secret_containment.py exists to deny, and cannot see, because it
+# scans the source tree and not the image.
+**/__pycache__
+**/*.py[cod]
+**/*~
+**/*.sw[op]
+
+# Already excluded by `*` above, and structurally too: the monorepo keeps .env at the
+# repository root while this context is backend/. These two lines are PLAN-BACKEND §9's
+# requirement written where a reviewer greps for it, and they guard the one case the
+# layout does not — a developer who runs the service from backend/ and leaves a
+# backend/.env behind. Both spellings, because `.env.*` does not match `.env`.
+.env
+.env.*
