@@ -14,7 +14,7 @@ POETRY  ?= poetry
 RUN     := $(POETRY) run
 
 .DEFAULT_GOAL := help
-.PHONY: help install up down migrate revision test cov lint typecheck imports
+.PHONY: help install hooks up down migrate revision test cov lint typecheck imports
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -28,6 +28,12 @@ help: ## Show this list
 # outside compose needs `set -a; . .env; set +a` first.
 install: ## Install the backend, with its development dependencies
 	$(POETRY) -C $(BACKEND) install
+
+# Once per clone. The hooks are ruff and gitleaks; both also run in CI, so this only buys
+# the seconds between writing a mistake and hearing about it — except for gitleaks, where
+# it is the difference between a secret that never entered history and one that did.
+hooks: ## Install the git pre-commit hooks
+	cd $(BACKEND) && $(RUN) pre-commit install
 
 # --- the stack ------------------------------------------------------------------------
 
