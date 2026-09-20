@@ -77,9 +77,10 @@ advertising budget.
   `--showlocals`, and `SecretStr`'s repr is the only thing keeping the key out of a
   failure report.
 * The key is unwrapped in exactly one module. `backend/tests/test_secret_containment.py`
-  greps the sources and fails if `keitaro_api_key` is named in more than two files — the
-  scan is textual, so a *comment* mentioning it in a third module turns the build red.
-  That is intended.
+  greps the sources against an allowlist of modules that may name `keitaro_api_key` at
+  all; naming it anywhere else fails the build. The scan is textual, so a *comment*
+  mentioning it in a module outside the list turns the build red too. That is intended —
+  widen the allowlist deliberately, in the commit that needs it.
 * **A field and its `.env.example` line move in the same commit.** The unknown-variable
   guard can only say "this prefixed name is a typo" while the two lists agree;
   `test_env_example_declares_exactly_the_model_fields` holds them together.
