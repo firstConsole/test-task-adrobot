@@ -46,7 +46,11 @@ from adrobot.infrastructure.keitaro.schemas import (
     KtLandingWrite,
     KtOffer,
     KtOfferWrite,
+    KtRange,
     KtReadModel,
+    KtReport,
+    KtReportFilter,
+    KtReportRequest,
     KtSource,
     KtStream,
     KtStreamWrite,
@@ -54,7 +58,7 @@ from adrobot.infrastructure.keitaro.schemas import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from datetime import tzinfo
+    from datetime import date, tzinfo
 
     from adrobot.domain.campaign import CampaignBlueprint
     from adrobot.domain.stream import StreamSpec
@@ -175,6 +179,49 @@ def stream_body(spec: StreamSpec) -> dict[str, Any]:
             for row in spec.offers
         ),
     ).body()
+
+
+def report_body(
+    *,
+    dimension: str,
+    measures: tuple[str, ...],
+    campaign_id: KeitaroCampaignId,
+    day: date,
+    timezone: str,
+) -> dict[str, Any]:
+    """Render `POST /report/build` for one campaign on one day.
+
+    The range is given as explicit dates rather than as the named interval `today`,
+    because the day belongs to the caller: the tracker's today and this machine's are the
+    same date only some of the time, and the whole point of taking a `date` is to be able
+    to ask for the other one.
+
+    The filter is a **report** filter — `{name, operator, expression}` — and not the
+    `{name, mode, payload}` a flow filter uses. The two are a word apart in the published
+    schema and confusing them shows up only here.
+    """
+    return KtReportRequest(
+        range=KtRange(timezone=timezone, from_=day.isoformat(), to=day.isoformat()),
+        dimensions=(dimension,),
+        measures=measures,
+        filters=(
+            KtReportFilter(name="campaign_id", operator="EQUALS", expression=int(campaign_id)),
+        ),
+    ).body()
+
+
+def to_report_rows(raw: object) -> tuple[Mapping[str, Any], ...]:
+    """Read a built report's rows, in whichever of the two shapes the build answers with.
+
+    The published schema types a row as a *string*, which it is not, so the shape comes
+    from what the endpoint actually returns and the wire model keeps only `rows`. A build
+    that answers with a bare array instead of `{rows, total, meta}` is read too: this is
+    the one endpoint the schema is known to be wrong about, and losing the statistics
+    column to an envelope would be a poor trade for three lines.
+    """
+    if isinstance(raw, list):
+        return tuple(row for row in raw if isinstance(row, dict))
+    return _validated(KtReport, raw).rows
 
 
 def _payload(value: str | Mapping[str, object] | None) -> str | dict[str, Any] | None:

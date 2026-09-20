@@ -38,12 +38,13 @@ class Offer:
 class OfferStats:
     """What one offer did in one day, as far as the report builder will say.
 
-    Whole numbers only, and no money. Revenue would need a decimal and a currency to be
-    worth anything, and the Stats column it would feed is empty in every frame of the
-    reference tool — so it is the first thing that would be cut, not the first thing built.
+    Two numbers, and both of them whole. Every measure a report asks for is one more name
+    a particular build of the tracker might not know, and one unknown name is answered by
+    rejecting the whole report — so the Stats column would go dark to show a figure nobody
+    asked for. Money is absent for a second reason: revenue would need a decimal and a
+    currency to mean anything, and the column it would feed is empty in every frame of the
+    reference tool.
     """
 
     clicks: int = 0
-    unique_clicks: int = 0
     conversions: int = 0
-    sales: int = 0
