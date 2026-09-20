@@ -176,6 +176,11 @@ assume.
   has wrapped them in `SecretStr` yet. That is why `UnknownSettingError` and
   `MissingSettingError` inherit `Exception`, and why the validator unbinds its argument
   before raising.
+* `httpx.Headers.__repr__` obfuscates `authorization`, `proxy-authorization` and
+  `cookie`, and prints every other header in full. Keitaro authenticates with `Api-Key`,
+  so a `Request` or a `Headers` object in a traceback — or in a log line — prints the
+  admin key. Nothing in `transport.py` logs a request, and nothing binds one to a name.
+
 * A pydantic field named `schema` — or `payload` on a model whose base declares a
   `payload()` method — emits `UserWarning: Field name "..." shadows an attribute in parent`
   at **class-definition time**. Under `filterwarnings = ["error"]` that is an ImportError,
