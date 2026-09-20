@@ -276,3 +276,29 @@ markers = [
 ]
 
 xfail_strict = true
+
+# =============================================================================
+#  Coverage
+# =============================================================================
+
+[tool.coverage.run]
+# The installed package by name, not a path: the project is installed editable, so a path
+# would measure one copy and report another. Resolved names still print as `src/adrobot/…`,
+# which is what the two `--include` gates in the Makefile match on.
+source_pkgs = ["adrobot"]
+# PLAN-BACKEND §2.1 asks for 100% of domain/shares.py by LINE AND BRANCH. Without this the
+# 100% gate would pass on a redistribute() whose `if reserved > TOTAL_SHARE` was never
+# taken in either direction.
+branch = true
+
+[tool.coverage.report]
+# `exclude_also` and never `exclude_lines`: the latter REPLACES coverage's defaults, and
+# those defaults are what exempt `if TYPE_CHECKING:` — a block the ruff config puts in
+# nearly every module — and the `...` bodies of the ABC ports. Replacing them would count
+# both as misses and sink the 100% gate.
+#
+# Only one entry, because the defaults already cover the rest. `@abstractmethod` is
+# deliberately absent: an exclusion that matches a decorator drops the whole decorated
+# body, so an abstract method that later grows a real implementation would leave the
+# denominator silently.
+exclude_also = ["raise NotImplementedError"]
