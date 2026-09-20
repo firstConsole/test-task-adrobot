@@ -6,6 +6,14 @@
 # backend/backend/src/... and report `E902 No such file or directory` on every file.
 # `-P` points poetry at the project without moving the process, and ruff finds
 # backend/pyproject.toml by walking up from each file it is given.
+#
+# `env -u VIRTUAL_ENV` in front of it is load-bearing, not caution. `poetry run` exports
+# VIRTUAL_ENV as the RELATIVE path `.venv`, so when these hooks are reached through
+# `poetry run pre-commit run --all-files` — which is what a developer types before
+# pushing — the inner poetry resolves it against the repository root, finds no venv
+# there, decides the active environment is broken and recreates backend/.venv EMPTY.
+# Measured: 126 packages to 3, on every run. Unsetting it makes `-P` the only thing that
+# decides which environment is used.
 
 repos:
   - repo: local
@@ -16,7 +24,7 @@ repos:
       # the CI job does not have. This is why pre-commit is a dev dependency.
       - id: ruff-format
         name: ruff format
-        entry: poetry -P backend run ruff format
+        entry: env -u VIRTUAL_ENV poetry -P backend run ruff format
         language: system
         # Without this, pre-commit hands the hook every staged file. `ruff format` formats
         # python blocks inside Markdown, and `[tool.ruff.format] exclude` does NOT apply to
@@ -31,7 +39,7 @@ repos:
       # Formatting is mechanical and safe to automate; a lint fix is a judgement call.
       - id: ruff-check
         name: ruff check
-        entry: poetry -P backend run ruff check
+        entry: env -u VIRTUAL_ENV poetry -P backend run ruff check
         language: system
         types_or: [python, pyi]
         require_serial: true
