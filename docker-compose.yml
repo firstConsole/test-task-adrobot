@@ -1,0 +1,151 @@
+# AD Robot — the development stack, and the half of the four-command start that is not
+# the README's:
+#
+#     cp .env.example .env && docker compose up
+#
+# Three services today. `web` — nginx serving the built SPA and proxying to api:8000 —
+# joins them at 9.8 (PLAN-00 §5.2); it is absent rather than stubbed, because there is no
+# frontend/ to build yet and a service whose build fails is not a placeholder.
+#
+# Three keys this file deliberately does not carry. `version:`, which Compose v2 ignores
+# and warns about. `networks:`, because the implicit default network already gives every
+# service a DNS name equal to its own, which is the whole of what `@db:5432` and 9.8's
+# nginx upstream need. And any `restart:` policy: every way a container can die at this
+# stage is a refusal 1.6 wrote to be read once, and a restart policy reprints it for ever
+# while reporting the service as running.
+
+# Pinned, so that the volume is `adrobot_pgdata` in a clone called `test-task-adrobot`,
+# in one called `adrobot`, and in the `mktemp -d` scripts/verify-fresh.sh (12.6) uses.
+# `-p` still overrides it, which is how CI isolates a run.
+name: adrobot
+
+services:
+  db:
+    # Fully qualified because podman resolves no implicit docker.io — on a host with no
+    # containers-registries.conf, a bare `postgres:18-trixie` does not resolve at all.
+    # Docker reads the long form identically.
+    #
+    # Debian and not alpine: the alpine image carries no glibc locales, so initdb builds
+    # the cluster in C collation and every ORDER BY comes back in byte order — measured,
+    # and it puts every capital letter before every lower-case one and every Cyrillic name
+    # after both. Offer and campaign names in this project are Cyrillic, the offer
+    # autocomplete (§7) sorts them, and a dev database that orders them differently from
+    # production is a defect nobody sees until stage 8.
+    #
+    # The OS is pinned alongside the major because Postgres records the collation version
+    # of the C library it was initialised against, and a base-image bump that moved glibc
+    # under a kept volume would be a warning on every connection and an index quietly
+    # sorted by the old rules.
+    image: docker.io/library/postgres:18-trixie
+    environment:
+      # These three are the user, password and database inside ADROBOT_DATABASE_URL, and
+      # they are read from .env rather than written here so that both spellings of one
+      # credential sit a few lines apart instead of a file apart. `:?` and not `:-`: a
+      # default here would disagree with that URL in silence, and arrive much later as
+      # "password authentication failed".
+      POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env first}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env first}
+      POSTGRES_DB: ${POSTGRES_DB:?copy .env.example to .env first}
+    # No `env_file:` on this service, and that is the point: the tracker Admin API key is
+    # one of the two assets PLAN-BACKEND §9 protects, and `db` has no reason to carry it
+    # in `docker inspect` or in the environment of anyone who reaches a shell here.
+    ports:
+      # Published because PLAN-BACKEND §11 runs the stage-5 database tests from a pytest
+      # on the HOST against this container — SQLite and testcontainers are both ruled out
+      # — and `db` is a name only the compose network knows. 127.0.0.1 and not 0.0.0.0:
+      # the password is `adrobot`, in a committed file. If 5432 is already taken, remap it
+      # in docker-compose.override.yml (.gitignore already ignores that file) — but the
+      # key has to be `ports: !override [...]`, because a plain list is MERGED with this
+      # one and publishes the container on both ports.
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # /var/lib/postgresql, not the /var/lib/postgresql/data every pre-18 compose file
+      # still carries: this image sets PGDATA=/var/lib/postgresql/18/docker and declares
+      # the volume one level up, and postgres 18 exits 1 against the old path, printing
+      # "there appears to be PostgreSQL data in /var/lib/postgresql/data (unused
+      # mount/volume) ... place a single mount at /var/lib/postgresql".
+      # A named volume and not ./pgdata, so nothing is written into the working tree and
+      # .gitignore needs no new line; `docker compose down -v` is what discards it.
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      # `-h 127.0.0.1` is the load-bearing part. On a fresh volume the entrypoint runs
+      # initdb against a temporary server started with listen_addresses='', so the bare
+      # `pg_isready` everyone writes answers over the unix socket and reports healthy
+      # while TCP is still refused — releasing migrator and api into a database that is
+      # about to be shut down and restarted.
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      # Covers initdb on a cold volume without spending retries on it. A probe that
+      # succeeds inside the period ends it immediately, so the warm path pays nothing.
+      start_period: 15s
+      retries: 15
+
+  migrator:
+    # `api` below owns the build; this is the same tag, so the migration that ran and the
+    # process that serves can never be two builds of two trees. `never` stops Compose
+    # asking a registry for a name only this file's build produces.
+    image: adrobot-api:dev
+    pull_policy: never
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    # This applies nothing today, and says so on every `up`. alembic is installed in the
+    # image — it is a main dependency — but alembic.ini and alembic/versions/ arrive at
+    # 1.9 and the Dockerfile does not COPY them yet, so `alembic upgrade head` here would
+    # exit 255 on every `docker compose up` and take `api` down with it through
+    # service_completed_successfully. What runs instead is the half of the job that does
+    # exist: prove the migration tool runs in this image, and say that no migration did.
+    #
+    # Everything around this command is already final. 1.9's whole change to this file is
+    # replacing the command with ["alembic", "upgrade", "head"].
+    command:
+      - sh
+      - -c
+      - >-
+        alembic --version &&
+        echo "migrator: no migrations in this image yet — sub-stage 1.9 turns this
+        command into 'alembic upgrade head'. Nothing has been applied to the database."
+    healthcheck:
+      # The shared image's HEALTHCHECK probes /healthz, which a container that serves
+      # nothing and exits in a second can never satisfy: left on, it pins this service at
+      # `Exited (0) (starting)` in `docker ps -a` for the rest of the day.
+      disable: true
+
+  api:
+    image: adrobot-api:dev
+    build:
+      # ./backend and not the repository root: COPY paths are context-relative, and — the
+      # part that is silent when you get it wrong — .dockerignore is only read at the
+      # context root, so a root context would make backend/.dockerignore inert and upload
+      # .env, .git and every tool cache to the engine.
+      context: ./backend
+    # Build it; never look for it in a registry. Without this, the first `docker compose
+    # up` on a clean machine prints `denied: requested access to the resource is denied`
+    # for a tag only this file builds, before falling back to the build anyway.
+    pull_policy: build
+    # The whole file, rather than the eight names copied into an `environment:` block.
+    # 1.6's guard enumerates the process environment and refuses an ADROBOT_* name no
+    # field claims; it can only do that for names that actually reach the container, and
+    # a list of eight would drop a misspelled ninth and report the one variable the
+    # operator spelled correctly. PLAN-00 §5.1 asks for one list, and this is the shape
+    # in which there is only one.
+    env_file: .env
+    depends_on:
+      # Through `migrator` rather than beside it: Compose starts db, waits for healthy,
+      # runs migrator, waits for exit 0, and only then starts api — so this single edge
+      # already carries both facts.
+      migrator:
+        condition: service_completed_successfully
+    ports:
+      # Loopback, for the same reason as the database. This stays published after 9.8
+      # puts nginx in front: the README, CI's smoke job and /docs all reach the API here.
+      - "127.0.0.1:8000:8000"
+    # No `healthcheck:` here. backend/Dockerfile carries one — on /healthz and never
+    # /readyz, with the reason beside it — and `docker compose build` keeps it, so
+    # `up --wait` already waits for it. Restating it would be a second copy of the path
+    # PLAN-00 §5.3 wants written once.
+
+volumes:
+  pgdata:

@@ -227,9 +227,11 @@ class Settings(BaseSettings):
         # Defaults go through the validators too, which is what resolves the "UTC" default
         # against this machine's tz database.
         validate_default=True,
-        # `.env.example` ships the two secrets with empty values. Treating an empty value
-        # as unset turns `cp .env.example .env && docker compose up` into "Field required"
-        # naming each variable, instead of a 401 from the tracker an hour later.
+        # An empty value is not a value. `.env.example` ships every required name with
+        # a usable placeholder, because the four-command start would otherwise die on a
+        # fresh clone — but the moment anyone blanks one, this is what turns
+        # `docker compose up` into a refusal naming that variable, instead of a 401 from
+        # the tracker an hour later.
         env_ignore_empty=True,
     )
 

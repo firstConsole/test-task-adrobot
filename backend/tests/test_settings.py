@@ -50,8 +50,26 @@ VALID_KEYWORDS: Final[dict[str, Any]] = {
 }
 
 
-def test_the_declared_fields_are_the_env_example_contract() -> None:
+def test_the_declared_fields_are_the_expected_set() -> None:
     assert frozenset(Settings.model_fields) == EXPECTED_FIELDS
+
+
+def test_env_example_declares_exactly_the_model_fields() -> None:
+    """Read the shipped template and hold it to the model, in both directions.
+
+    Until 1.8 this contract was a sentence in three files. It is the premise the
+    unknown-variable guard rests on — a prefixed name is a typo only while the template
+    and the model list the same names — so it is worth a test that fails when a field is
+    added without its line, or a line survives a field being removed.
+    """
+    template = Path(__file__).parents[2] / ".env.example"
+    declared = {f"{ENV_PREFIX}{name}".upper() for name in Settings.model_fields}
+    written = {
+        line.split("=", 1)[0]
+        for line in template.read_text(encoding="utf-8").splitlines()
+        if line.startswith(ENV_PREFIX)
+    }
+    assert written == declared
 
 
 def test_every_required_field_is_in_the_canonical_test_environment() -> None:

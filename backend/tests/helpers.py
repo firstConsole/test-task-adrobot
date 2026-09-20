@@ -20,8 +20,9 @@ if TYPE_CHECKING:
 ENV_PREFIX: Final = "ADROBOT_"
 
 # One canonical working environment, so that a test which cares about a single variable
-# states only that variable. Kept in step with .env.example (1.8) by the field-set test in
-# tests/test_settings.py, which fails in both directions.
+# states only that variable. Kept in step with the repository's .env.example by
+# tests/test_settings.py::test_env_example_declares_exactly_the_model_fields, which parses
+# that file and compares it with the model in both directions.
 VALID_ENVIRONMENT: Final[dict[str, str]] = {
     "ADROBOT_ENV": "dev",
     "ADROBOT_DATABASE_URL": "postgresql+asyncpg://adrobot:adrobot@db:5432/adrobot",
