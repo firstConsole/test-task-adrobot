@@ -56,7 +56,7 @@ def redistribute(rows: tuple[OfferRow, ...]) -> tuple[OfferRow, ...]:
     Raises `PinnedSharesExceedTotalError` when the pins reserve more than the whole, which
     is a state the pin endpoint refuses to create rather than one to resolve here.
     """
-    _reject_duplicates(rows)
+    reject_duplicate_rows(rows)
     active = [row for row in rows if not row.removed]
 
     held: dict[OfferId, int] = {}
@@ -119,7 +119,8 @@ def _most_recently_activated_first(row: OfferRow) -> tuple[int, int]:
     return (-row.activated_at, -row.seq)
 
 
-def _reject_duplicates(rows: tuple[OfferRow, ...]) -> None:
+def reject_duplicate_rows(rows: tuple[OfferRow, ...]) -> None:
+    """Refuse a second row for the same offer — the tracker's own unique key forbids one."""
     seen: set[OfferId] = set()
     duplicated: set[OfferId] = set()
     for row in rows:

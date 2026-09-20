@@ -75,3 +75,24 @@ class PinnedSharesExceedTotalError(DomainError):
 
     def __init__(self, reserved: int) -> None:
         super().__init__(f"pinned rows reserve {reserved}%, which is more than the whole stream")
+
+
+class OfferAlreadyInStreamError(DomainError):
+    """The stream already carries this offer, removed or not; BRING BACK is the other verb."""
+
+    def __init__(self, offer_id: object) -> None:
+        super().__init__(f"this stream already carries offer {clip(offer_id)}")
+
+
+class OfferAlreadyRemovedError(DomainError):
+    """The row is already out of the division, so removing it again would change nothing."""
+
+    def __init__(self, offer_id: object) -> None:
+        super().__init__(f"offer {clip(offer_id)} is already removed from this stream")
+
+
+class OfferNotRemovedError(DomainError):
+    """The row is active, so there is nothing to bring back."""
+
+    def __init__(self, offer_id: object) -> None:
+        super().__init__(f"offer {clip(offer_id)} is not removed, so it cannot be brought back")
