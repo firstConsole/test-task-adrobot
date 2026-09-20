@@ -87,7 +87,7 @@ def test_a_pinned_share_is_the_one_number_a_client_names_and_so_is_checked() -> 
 
 def test_a_tombstone_carries_the_moment_it_became_one() -> None:
     wanted = "(mirror_state = 'absent') = (absent_since IS NOT NULL)"
-    for name in ("streams", "stream_offers"):
+    for name in ("streams", "stream_offers", "offers"):
         assert wanted in checks(name).values(), name
 
 

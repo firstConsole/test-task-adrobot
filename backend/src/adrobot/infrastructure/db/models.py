@@ -1,4 +1,4 @@
-"""The mirror: our copy of what Keitaro holds, and the pins we keep beside it.
+"""Every table this service owns: the mirror of Keitaro, the draft, the audit, the catalogue.
 
 Two rules shape every table here. The mirror of somebody else's data is tolerant — their
 values arrive as text and integers with no CHECK, because a campaign we cannot open is
@@ -16,7 +16,16 @@ from enum import Enum, StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Text,
+    UniqueConstraint,
+    cast,
+    text,
+)
 from sqlalchemy import Enum as SqlEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -48,7 +57,7 @@ class MirrorState(StrEnum):
 def _as_varchar_with_check[E: Enum](enumeration: type[E], name: str, length: int) -> SqlEnum:
     """Persist one of our own enumerations as VARCHAR plus a named CHECK.
 
-    Not a native PostgreSQL enum: `mirror_state` is used by two tables, alembic creates a
+    Not a native PostgreSQL enum: `mirror_state` is used by three tables, alembic creates a
     shared type implicitly and never drops it, and `ALTER TYPE` cannot run in the same
     transaction as the migration that needs it.
     """
@@ -219,6 +228,65 @@ class DbOfferPin(Base, TimestampsMixin):
         # stream_offers.share is denied.
         CheckConstraint("locked_share BETWEEN 0 AND 100", name="locked_share_is_a_percentage"),
     )
+
+
+class DbOffer(Base, TimestampsMixin):
+    """The local mirror of the tracker's offer catalogue, and the only thing a search reads.
+
+    It exists because `GET /offers` takes no query parameters at all, so there is no
+    server-side search to build the editor's combobox on. One column per field of the domain
+    `Offer` and no more: PLAN-BACKEND §7 also asks for a `raw jsonb`, which is dropped
+    because the admin port hands this layer a domain `Offer` — there is no wire payload here
+    to put in it.
+    """
+
+    __tablename__ = "offers"
+
+    id: Mapped[OfferId] = mapped_column(primary_key=True, autoincrement=False)
+    name: Mapped[str]
+    state: Mapped[str]
+    # NOT NULL defaulted to the empty array: the domain's `tuple[str, ...] = ()` has one
+    # representation of "no countries", and a dash is one of the values Keitaro really sends.
+    country: Mapped[list[str]] = mapped_column(server_default=text("'{}'::text[]"))
+    group_id: Mapped[int | None] = mapped_column(BigInteger)
+    affiliate_network: Mapped[str | None]
+    # Stays relative, as the domain insists: the absolute link is joined onto the tracker's
+    # public base where it is rendered, and that base is configuration rather than a fact.
+    preview_path: Mapped[str | None]
+    mirror_state: Mapped[MirrorState] = mapped_column(
+        MIRROR_STATE, server_default=text("'present'")
+    )
+    absent_since: Mapped[datetime | None]
+
+    __table_args__ = (
+        CheckConstraint(
+            "(mirror_state = 'absent') = (absent_since IS NOT NULL)",
+            name="absent_since_matches_mirror_state",
+        ),
+        # Serves the `name ILIKE '%...%'` arm of the search. A btree cannot, in any collation
+        # and with any operator class. Needs pg_trgm, which migration 0004 creates first.
+        Index(
+            "ix_offers_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
+        ),
+    )
+
+
+# Serves the id-prefix arm — the video's «11104». Two measured traps, both silent:
+#   * cast to `Text` and never to `String`. `String` renders VARCHAR, and LIKE then adds a
+#     second coercion, so the planner sees `((id)::character varying)::text` and scans.
+#   * `postgresql_ops` only lands when its key is the expression's own label. Keyed on
+#     anything else the operator class is dropped with no error, and without
+#     `text_pattern_ops` a non-C collation makes the index unusable for a prefix match.
+# Module level rather than in `__table_args__` because the expression names the mapped
+# column; declaring it here still attaches it to the table.
+ID_AS_TEXT = Index(
+    "ix_offers_id_as_text",
+    cast(DbOffer.id, Text).label("id_as_text"),
+    postgresql_ops={"id_as_text": "text_pattern_ops"},
+)
 
 
 class DbStreamDraft(Base, TimestampsMixin):

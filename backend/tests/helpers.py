@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import CheckConstraint
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.schema import CreateTable, Table
+from sqlalchemy.schema import CreateIndex, CreateTable, Table
 
 from adrobot.domain.ids import OfferId
 from adrobot.domain.shares import OfferRow
@@ -114,3 +114,10 @@ def checks(table_name: str) -> dict[str, str]:
         for constraint in table(table_name).constraints
         if isinstance(constraint, CheckConstraint)
     }
+
+
+def index_ddl(table_name: str, index_name: str) -> str:
+    """Compile one index's CREATE INDEX. The access method and the operator class live only
+    here — alembic compares neither, so nothing else can notice them going missing."""
+    index = next(ix for ix in table(table_name).indexes if ix.name == index_name)
+    return str(CreateIndex(index).compile(dialect=POSTGRES))
