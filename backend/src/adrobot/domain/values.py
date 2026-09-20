@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from enum import Enum
 from typing import Final, final
 
 from adrobot.domain.errors import (
@@ -90,3 +91,10 @@ class CampaignAlias(str):
         if not _ALIAS.fullmatch(value):
             raise InvalidCampaignAliasError(value)
         return super().__new__(cls, value)
+
+
+class OfferState(Enum):
+    """Whether an offer in a stream takes traffic. The tracker's own two values."""
+
+    ACTIVE = "active"
+    DISABLED = "disabled"

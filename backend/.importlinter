@@ -48,6 +48,7 @@ ignore_imports =
   adrobot.domain.** -> dataclasses
   adrobot.domain.** -> datetime
   adrobot.domain.** -> enum
+  adrobot.domain.** -> hashlib
   adrobot.domain.** -> re
   adrobot.domain.** -> types
   adrobot.domain.** -> typing
