@@ -47,6 +47,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
@@ -103,6 +104,15 @@ PUT_SHARES: Final = (50, 30, 20)
 # Question 4. The two dimensions are the whole stats screen: clicks per flow and clicks per
 # offer (PLAN-BACKEND §3). The wide list is sent once, on its own, to find out which names
 # this build knows — a rejected column is named in the error body, which the dump keeps.
+# Questions 6 and 7. `/settings` is in no path of the published spec, so the first thing
+# to find out is whether this build answers it at all. What it returns is unknown too,
+# which is why only the keys that sound like an answer are printed and the whole object
+# goes to the dump: a settings object is where a licence key would live.
+SETTINGS_INTEREST: Final = ("time", "zone", "version", "locale", "currency", "language")
+SETTINGS_VALUE_WIDTH: Final = 60
+CLOCK_TOLERANCE_SECONDS: Final = 60
+ZONE_TOLERANCE_HOURS: Final = 0.25
+
 REPORT_MEASURE: Final = "clicks"
 REPORT_DIMENSIONS: Final = ("stream_id", "offer_id")
 WIDE_MEASURES: Final = ("clicks", "campaign_unique_clicks", "conversions", "sales", "revenue")
@@ -176,6 +186,11 @@ def _field(observation: Observation, name: str) -> object:
 def _int_field(observation: Observation, name: str) -> int | None:
     value = _field(observation, name)
     return value if isinstance(value, int) else None
+
+
+def _count(number: int, noun: str) -> str:
+    """Return "1 request" or "12 requests": these strings are read by people, in a document."""
+    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
 
 
 def _named(rows: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
@@ -790,6 +805,7 @@ async def probe_create(session: Session) -> None:
         print("    the campaign was refused; there is nothing to hang a flow on")
         return
     _campaign_findings(session, campaign)
+    _tracker_offset_finding(session, campaign)
     campaign_id = _int_field(campaign, "id")
     if campaign_id is None:
         return
@@ -864,6 +880,126 @@ async def probe_name_limit(session: Session) -> None:
             "refuted",
             f"accepted and silently cut to {length} characters: validate at our own boundary",
         )
+
+
+def _tracker_offset_finding(session: Session, created: Observation) -> None:
+    """Work out the tracker's zone from a row it has just written, and from nothing else.
+
+    Keitaro serialises timestamps without an offset, in its own zone (PLAN-00 §5.14). A
+    row written a moment ago, next to the `Date` header of the very same response, gives
+    that offset exactly — and it is the number the "clicks today" boundary is made of, on
+    a tracker whose `/settings` may not answer at all.
+    """
+    claim = "The tracker writes its timestamps in the zone ADROBOT_KEITARO_TIMEZONE names"
+    stamp = _field(created, "created_at")
+    header = created.headers.get("date")
+    if not isinstance(stamp, str) or header is None:
+        session.finding(claim, "open", "the create answered with no created_at or no Date header")
+        return
+    try:
+        written = datetime.fromisoformat(stamp)
+        served = parsedate_to_datetime(header)
+    except ValueError:
+        session.finding(claim, "open", f"created_at {stamp!r} and Date {header!r} do not parse")
+        return
+    if written.tzinfo is not None:
+        session.finding(
+            claim,
+            "refuted",
+            f"created_at came back as {stamp!r}, which carries its own offset — nothing has "
+            f"to be inferred, and the mapper must not strip it",
+        )
+        return
+    configured = datetime.now(ZoneInfo(session.timezone)).utcoffset()
+    if configured is None:  # pragma: no cover - an aware datetime always has one
+        return
+    observed = (written.replace(tzinfo=UTC) - served).total_seconds() / 3600
+    expected = configured.total_seconds() / 3600
+    session.finding(
+        claim,
+        "confirmed" if abs(observed - expected) < ZONE_TOLERANCE_HOURS else "refuted",
+        f"a row written now reads {stamp!r} against a response served at "
+        f"{served:%H:%M}Z: the tracker is at UTC{observed:+.1f}, while "
+        f"{session.timezone} is at UTC{expected:+.1f} today",
+    )
+
+
+def _clock_finding(session: Session, observation: Observation) -> None:
+    """Compare the tracker's clock with ours: a skew moves every boundary a day has."""
+    claim = "The tracker's clock and this machine's agree to within a minute"
+    header = observation.headers.get("date")
+    if header is None:
+        session.finding(claim, "open", "the response carried no Date header")
+        return
+    try:
+        served = parsedate_to_datetime(header)
+    except ValueError:
+        session.finding(claim, "open", f"its Date header {header!r} does not parse")
+        return
+    skew = (datetime.now(UTC) - served).total_seconds()
+    session.finding(
+        claim,
+        "confirmed" if abs(skew) <= CLOCK_TOLERANCE_SECONDS else "refuted",
+        f"it served {served:%Y-%m-%d %H:%M:%S}Z, {abs(skew):.0f} s "
+        f"{'behind' if skew > 0 else 'ahead of'} this machine",
+    )
+
+
+def _settings_value(body: dict[str, Any], *words: str) -> tuple[str, str] | None:
+    """Return the first key whose name contains one of `words`, with its value."""
+    for key, value in body.items():
+        name = str(key).casefold()
+        if any(word in name for word in words):
+            return str(key), str(value)
+    return None
+
+
+async def probe_settings(session: Session) -> None:
+    """Ask the tracker its own version and time zone, down a path the spec does not list."""
+    settings = await session.get("/settings", label="settings", listing=False, may_fail=True)
+    session.finding(
+        "GET /settings answers, although the published spec has no such path",
+        "confirmed" if settings.ok else "refuted",
+        f"it answered {settings.status}",
+    )
+    _clock_finding(session, settings)
+    if not settings.ok:
+        print("    the tracker's own zone has to come from a timestamp it writes: run `create`")
+        return
+
+    body = settings.body if isinstance(settings.body, dict) else {}
+    cleaned = redact(body)
+    shown = cleaned if isinstance(cleaned, dict) else {}
+    for key in sorted(shown):
+        if any(word in str(key).casefold() for word in SETTINGS_INTEREST):
+            value = str(shown[key])
+            cut = (
+                value
+                if len(value) <= SETTINGS_VALUE_WIDTH
+                else f"{value[:SETTINGS_VALUE_WIDTH]}..."
+            )
+            print(f"    {key}: {cut}")
+    print(f"    {len(body)} keys in all; only the ones that sound like an answer are printed")
+
+    version = _settings_value(body, "version")
+    session.finding(
+        "GET /settings names the build, which is what decides whether click_id is event_id",
+        "confirmed" if version else "open",
+        f"{version[0]} = {version[1]}" if version else "no key of its own names a version",
+    )
+
+    zone = _settings_value(body, "timezone", "time_zone")
+    claim = "The tracker's own zone is the one ADROBOT_KEITARO_TIMEZONE is set to"
+    if zone is None:
+        session.finding(claim, "open", "settings carries no key that names a time zone")
+        return
+    session.finding(
+        claim,
+        "confirmed" if zone[1] == session.timezone else "refuted",
+        f"the tracker says {zone[1]!r} and the service is configured with "
+        f"{session.timezone!r}"
+        + ("" if zone[1] == session.timezone else " — the variable is what has to change"),
+    )
 
 
 def _report_rows(observation: Observation) -> list[dict[str, Any]]:
@@ -1296,6 +1432,7 @@ PROBES: Final = {
     "offers": probe_offers,
     "catalogues": probe_catalogues,
     "report": probe_report,
+    "settings": probe_settings,
 }
 
 # Apart from PROBES and never in the default set: a bare `kt_probe.py` must not create
@@ -1335,7 +1472,7 @@ def _close_out(session: Session) -> None:
         session.finding(
             "The Admin API answers directly, without redirecting",
             "confirmed",
-            f"{session.calls} requests, no 3xx",
+            f"{_count(session.calls, 'request')}, and not one of them redirected",
         )
 
 
