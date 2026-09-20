@@ -23,6 +23,8 @@
 !pyproject.toml
 !poetry.lock
 !src
+!alembic.ini
+!alembic
 
 # src/ is the one directory named back in, and a working tree leaves things inside it that
 # are not source. Not hygiene for its own sake: `poetry build` packages whatever sits

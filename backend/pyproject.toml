@@ -201,10 +201,8 @@ exclude = ["*.md"]
 # is no interpreter matrix to describe.
 python_version = "3.13"
 # Resolved against the process cwd, not against this file — mypy is invoked as
-# `cd backend && mypy`, the same rule ruff's `src` already carries. alembic/
-# joins this list at 1.9, together with the template that makes a generated
-# migration survive strict mode.
-files = ["src", "tests"]
+# `cd backend && mypy`, the same rule ruff's `src` already carries.
+files = ["src", "tests", "alembic"]
 mypy_path = "src"
 # tests/ carries no __init__.py (1.1). Without this, `from tests.fakes import ...`
 # does not resolve and two test files sharing a basename abort the entire run

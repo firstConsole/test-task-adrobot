@@ -107,9 +107,17 @@ RUN python -c "import zoneinfo; zoneinfo.ZoneInfo('UTC')" \
 # Created explicitly rather than left to WORKDIR. A WORKDIR whose directory does not exist
 # is created at build time by Docker, owned by root, and at run time by buildah/podman,
 # owned by and writable to the container user — so the same file would otherwise produce
-# two different images. 1.9 puts alembic.ini and alembic/ here.
+# two different images.
 RUN install --directory --owner=root --group=root --mode=0755 /app
 WORKDIR /app
+
+# The migration tool and its script directory, root-owned like the venv. The compose
+# `migrator` service is this same image with `alembic upgrade head` as its command, and
+# alembic reads its ini from the working directory. Last in the file, so that editing a
+# migration rebuilds two small layers rather than the dependency install above.
+COPY alembic.ini ./
+COPY alembic ./alembic
+
 USER adrobot
 
 # nginx proxies to api:8000 at 9.8 (PLAN-00 §5.2). Documentation; it publishes nothing.
