@@ -128,8 +128,9 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 
 # Deliberately not here yet, and which stage brings it:
 #
-#   4.x   tests/fakes.py — FakeKeitaroAdmin / FakeKeitaroReports, the second
-#         implementation of the ports. Nothing to fake before a port exists.
+#   6.x   fixtures over tests/fakes.py. The fakes themselves arrived at 4.8; a fixture
+#         for one belongs in the commit that brings the first scenario to build on it,
+#         because what a scenario wants configured is not knowable before there is one.
 #   6.6   a `client` that runs the lifespan. ASGITransport does not run one, and there is
 #         still none to run: 4.3 gave the tracker client its own context manager instead
 #         of an application lifespan. The day create_app takes a ports factory, this
