@@ -84,6 +84,15 @@ advertising budget.
 * **A field and its `.env.example` line move in the same commit.** The unknown-variable
   guard can only say "this prefixed name is a typo" while the two lists agree;
   `test_env_example_declares_exactly_the_model_fields` holds them together.
+* **A raw tracker response reaches neither a terminal nor a tracked file.**
+  `scripts/kt_probe.py` writes them to `/.scratch/`, which `.gitignore` covers, and
+  prints through `redact`. It is also the one file outside `src/adrobot/` that unwraps
+  the admin key: the containment test scans the package, and a probe has to
+  authenticate somehow.
+* **A probe that writes has to be named on the command line**, so a bare run of the script
+  cannot create anything. What one creates carries the `ADROBOT-TEST` prefix, belongs to
+  the `ADROBOT-TEST` campaign group and is appended to `/.scratch/kt-probe/created.json` —
+  the ledger the tracker is cleaned up from.
 * Never log a Keitaro response body on 2xx. On a non-2xx, pass it through
   `adrobot.logging.redact` first — Keitaro returns a campaign's Click API token inside the
   campaign object.
@@ -122,9 +131,9 @@ advertising budget.
 
 ## Tests
 
-* mypy runs strict over `src`, `tests` and `alembic`. ruff's annotation rules are off for
-  `tests/**`, so **mypy is the only thing requiring a `-> None` on a test** — it still
-  requires it.
+* mypy runs strict over `src`, `tests`, `alembic` and `scripts`. ruff's annotation rules
+  are off for `tests/**`, so **mypy is the only thing requiring a `-> None` on a test** —
+  it still requires it.
 * `conftest.py` holds fixtures only. Shared constants and helpers live in
   `tests/helpers.py` and are imported as `from tests.helpers import ...`.
 * There are no `__init__.py` files under `tests/`. pytest collects with
@@ -132,6 +141,10 @@ advertising budget.
 * `filterwarnings = ["error"]`. `fastapi.testclient.TestClient` is therefore unusable —
   it emits a deprecation under httpx 0.x. API tests go through `httpx.ASGITransport`.
 * Async tests need no decorator and no `pytestmark`: `anyio_mode = "auto"`.
+* **A fact about the Keitaro API belongs in `docs/keitaro-api-notes.md`**, under the
+  heading that says where it came from: the schema, or the tracker. A claim about the
+  schema also gets an assertion in `tests/test_keitaro_spec.py` — including the defects in
+  it, because one being fixed upstream is news too.
 * A bare `pytest` on a fresh clone is green. Tests that need PostgreSQL carry the `db`
   marker and skip with a visible reason.
 

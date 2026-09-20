@@ -14,7 +14,7 @@ POETRY  ?= poetry
 RUN     := $(POETRY) run
 
 .DEFAULT_GOAL := help
-.PHONY: help install hooks up down migrate revision test cov lint typecheck imports
+.PHONY: help install hooks up down migrate revision test cov lint typecheck imports probe
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -66,7 +66,7 @@ lint: ## Lint and check formatting
 	cd $(BACKEND) && $(RUN) ruff check .
 	cd $(BACKEND) && $(RUN) ruff format --check .
 
-typecheck: ## Type-check src, tests and alembic under mypy strict
+typecheck: ## Type-check src, tests, alembic and scripts under mypy strict
 	cd $(BACKEND) && $(RUN) mypy
 
 # Red until sub-stage 4.2, and deliberately not chained into any other target: the three
@@ -75,6 +75,21 @@ typecheck: ## Type-check src, tests and alembic under mypy strict
 # those packages exist this prints `Module 'adrobot.domain' does not exist.` and exits 1.
 imports: ## Check the layer boundaries (red until stage 4.2)
 	cd $(BACKEND) && $(RUN) lint-imports --no-logo --no-cache
+
+# --- the tracker ----------------------------------------------------------------------
+
+# Stage 2 reconnaissance against a live Keitaro, so unlike everything above it needs real
+# credentials — the .env at the repository root. Sourced on the same line as the command
+# because a variable exported by one recipe line does not survive into the next, and the
+# file is read here rather than by Settings for the reason AGENTS.md gives: every backend
+# tool runs from backend/ while .env lives one directory up.
+#
+# `make probe` alone only reads. The writing probes — `create`, `name-limit` — have to be
+# named, and what they create carries the ADROBOT-TEST prefix and is listed in
+# .scratch/kt-probe/created.json, which the cleanup at 2.7 works from.
+probe: ## Probe the live Keitaro API (stage 2): make probe P="groups offers"
+	@test -f .env || { echo 'no .env: cp .env.example .env and put the real tracker URL and key in it'; exit 1; }
+	set -a; . ./.env; set +a; cd $(BACKEND) && $(RUN) python scripts/kt_probe.py $(P)
 
 # Two gates, because one number cannot say both things (PLAN-BACKEND §2.1): the share
 # arithmetic is the file this project is judged on, and the rings around it are held to a
