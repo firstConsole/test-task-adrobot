@@ -10,7 +10,13 @@ export type Problem = components['schemas']['ProblemDetails']
  * front — Vite in development, nginx in production — is what holds the shared token. No
  * VITE_ variable exists, so neither the token nor the tracker's address can be bundled.
  */
-export const api = createClient<paths>()
+export const api = createClient<paths>({
+  // Resolved per call rather than captured once. `openapi-fetch` reads `globalThis.fetch`
+  // when the client is made, which pins this module to whichever fetch existed at import
+  // time — invisible in the browser, and the reason a test that replaces fetch afterwards
+  // would still be talking to the real one.
+  fetch: (request) => globalThis.fetch(request),
+})
 
 export class ApiError extends Error {
   readonly problem: Problem

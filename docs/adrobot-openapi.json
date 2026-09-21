@@ -2,7 +2,7 @@
   "components": {
     "schemas": {
       "CampaignResponse": {
-        "description": "A campaign as this API answers for one.\n\n`public_url` is a plain string and not an `HttpUrl`: it is built from a domain name the\ntracker gave us, and a response model that refused to serialise somebody else's data\nwould turn a campaign that exists into a 500.",
+        "description": "A campaign as this API answers for one.\n\nTwo links, and they go to different places. `public_url` is what a buyer puts in an ad;\n`tracker_url` is where a reviewer opens the campaign in Keitaro to check our arithmetic\nagainst the tracker's own screen.\n\n`public_url` is a plain string and not an `HttpUrl`: it is built from a domain name the\ntracker gave us, and a response model that refused to serialise somebody else's data\nwould turn a campaign that exists into a 500.",
         "properties": {
           "alias": {
             "title": "Alias",
@@ -89,6 +89,10 @@
               }
             ],
             "title": "Synced At"
+          },
+          "tracker_url": {
+            "title": "Tracker Url",
+            "type": "string"
           }
         },
         "required": [
@@ -98,6 +102,7 @@
           "name",
           "state",
           "setup_status",
+          "tracker_url",
           "created_at"
         ],
         "title": "CampaignResponse",

@@ -23,6 +23,7 @@ from __future__ import annotations
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Final
+from urllib.parse import urljoin
 from uuid import UUID
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
@@ -136,8 +137,24 @@ class CampaignsQuery(BaseModel):
     )
 
 
+def tracker_url(base: str, keitaro_campaign_id: int) -> str:
+    """Build the link to this campaign's own page in Keitaro's admin, which `VIEW IN KT` opens.
+
+    Assembled here for the same reason `preview_url` is: which tracker this service wraps is
+    configuration, and this is the layer that holds it. It matters that the frontend never
+    learns the tracker's address — no `VITE_` variable exists, the browser calls `/api` on its
+    own origin, and a link into somebody's tracker that reached the bundle would be the one
+    string that gave that address away.
+    """
+    return urljoin(base, f"/admin/#/campaigns/{keitaro_campaign_id}")
+
+
 class CampaignResponse(BaseModel):
     """A campaign as this API answers for one.
+
+    Two links, and they go to different places. `public_url` is what a buyer puts in an ad;
+    `tracker_url` is where a reviewer opens the campaign in Keitaro to check our arithmetic
+    against the tracker's own screen.
 
     `public_url` is a plain string and not an `HttpUrl`: it is built from a domain name the
     tracker gave us, and a response model that refused to serialise somebody else's data
@@ -151,6 +168,7 @@ class CampaignResponse(BaseModel):
     state: str
     setup_status: CampaignSetupStatus
     public_url: str | None = None
+    tracker_url: str
     requested_country: str | None = None
     requested_offer_id: int | None = None
     synced_at: datetime | None = None
@@ -165,7 +183,7 @@ class CampaignResponse(BaseModel):
     )
 
     @classmethod
-    def of(cls, view: CampaignView) -> CampaignResponse:
+    def of(cls, view: CampaignView, *, tracker: str) -> CampaignResponse:
         """Render one view, which is the only way this model is built."""
         return cls(
             id=view.campaign.id,
@@ -175,6 +193,7 @@ class CampaignResponse(BaseModel):
             state=view.campaign.state,
             setup_status=view.campaign.setup_status,
             public_url=view.public_url,
+            tracker_url=tracker_url(tracker, view.campaign.keitaro_campaign_id),
             requested_country=view.campaign.requested_country,
             requested_offer_id=view.campaign.requested_offer_id,
             synced_at=view.campaign.synced_at,
@@ -190,9 +209,9 @@ class CampaignsPageResponse(BaseModel):
     next_cursor: str | None = None
 
     @classmethod
-    def of(cls, page: CampaignsPage) -> CampaignsPageResponse:
+    def of(cls, page: CampaignsPage, *, tracker: str) -> CampaignsPageResponse:
         """Render one page, encoding the cursor the repository answered with."""
         return cls(
-            campaigns=tuple(CampaignResponse.of(view) for view in page.campaigns),
+            campaigns=tuple(CampaignResponse.of(view, tracker=tracker) for view in page.campaigns),
             next_cursor=None if page.next_cursor is None else encode_cursor(page.next_cursor),
         )
