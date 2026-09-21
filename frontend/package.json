@@ -16,10 +16,12 @@
     "api:types:check": "npm run api:types && git diff --exit-code -- src/shared/api/schema.gen.ts"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.103.2",
     "class-variance-authority": "^0.7.1",
     "cmdk": "^1.1.1",
     "cn": "^0.3.0",
     "lucide-react": "^1.47.0",
+    "openapi-fetch": "^0.17.0",
     "radix-ui": "^1.6.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

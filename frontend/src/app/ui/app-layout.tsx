@@ -2,6 +2,7 @@ import { cn } from 'cn'
 import { Link, NavLink, Outlet } from 'react-router'
 
 import { ROUTES } from '@/shared/config/routes'
+import { Toaster } from '@/shared/ui/sonner'
 
 const NAV = [
   { to: ROUTES.campaignList, label: 'Campaigns', end: true },
@@ -35,6 +36,7 @@ export function AppLayout() {
       <main className="mx-auto max-w-6xl px-6 py-6">
         <Outlet />
       </main>
+      <Toaster position="bottom-right" />
     </div>
   )
 }
