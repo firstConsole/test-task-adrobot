@@ -8,7 +8,8 @@ it, and the contract fails on the indirect edge as well as the direct one.
 Two lifetimes, and telling them apart is the whole job.
 
 **Per process** is everything below: one HTTP client for the tracker, one connection pool,
-one reference cache. They are opened by the block this module hands out and closed when it
+one reference cache, one window on the day's statistics and one reading of the tracker's
+zone. They are opened by the block this module hands out and closed when it
 leaves, and neither resource is opened *here* — `keitaro_transport` and `database` each own
 their own, so this module composes two blocks and knows nothing about sockets.
 
@@ -31,6 +32,8 @@ from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPo
 from adrobot.application.ports.persistence import UnitOfWork
 from adrobot.application.ports.system import AliasFactory, Clock, CorrelationIds
 from adrobot.application.reference import ReferenceResolver
+from adrobot.application.statistics import StatsReader
+from adrobot.application.time_zone import TrackerTimeZone
 from adrobot.infrastructure.db.engine import database
 from adrobot.infrastructure.db.uow import unit_of_work
 from adrobot.infrastructure.keitaro.admin import HttpKeitaroAdmin
@@ -62,6 +65,8 @@ class AppPorts:
     admin: KeitaroAdminPort
     reports: KeitaroReportsPort
     references: ReferenceResolver
+    statistics: StatsReader
+    zone: TrackerTimeZone
     aliases: AliasFactory
     clock: Clock
     correlation: CorrelationIds
@@ -82,13 +87,22 @@ async def build_ports(settings: Settings) -> AsyncIterator[AppPorts]:
         # admin parses naive timestamps with a `tzinfo`, the report builder sends the IANA
         # name in the request body. Resolved once here rather than twice down there.
         admin = HttpKeitaroAdmin(transport, zone=ZoneInfo(settings.keitaro_timezone))
+        reports = HttpKeitaroReports(transport)
+        # Asked of the tracker on the first screen that needs it and then never again, so
+        # this opens nothing and delays no start-up. The configured name is what stands if
+        # the tracker will not say — see `application/time_zone.py`.
+        zone = TrackerTimeZone(admin, configured=settings.keitaro_timezone)
         yield AppPorts(
             admin=admin,
-            reports=HttpKeitaroReports(transport, timezone=settings.keitaro_timezone),
+            reports=reports,
             # One resolver for the process, which is what makes its five-minute cache worth
             # having and what makes the campaign group be created once rather than per
             # request.
             references=ReferenceResolver(admin, clock),
+            # And one reader, for the same reason: a window that every request rebuilt would
+            # be a window nothing ever falls inside.
+            statistics=StatsReader(reports, clock, zone=zone),
+            zone=zone,
             aliases=SecretsAliasFactory(),
             clock=clock,
             correlation=ContextCorrelationIds(),

@@ -24,6 +24,7 @@ from adrobot.infrastructure.keitaro.mapping import (
     to_reference_data,
     to_stream,
     to_streams,
+    to_time_zone,
 )
 
 if TYPE_CHECKING:
@@ -40,14 +41,22 @@ if TYPE_CHECKING:
 # which is how a generator writes "optional". It is always sent.
 CAMPAIGN_GROUPS: Final = {"type": "campaigns"}
 
+SETTINGS: Final = "/settings"
+"""The tracker's own configuration. Named here although no path in the published schema is:
+a build that does not have it answers 404, which is an answer this service acts on."""
+
 
 class HttpKeitaroAdmin(KeitaroAdminPort):
     """The real tracker, behind the port that `tests/fakes.py` implements a second time."""
 
     def __init__(self, transport: KeitaroTransport, *, zone: tzinfo) -> None:
         self._transport = transport
-        # The tracker's own time zone, needed at every read that carries a timestamp:
-        # Keitaro serialises them without an offset (PLAN-00 §5.14).
+        # The configured zone, and deliberately not the one `get_time_zone` below reads.
+        # It is applied to the timestamps on a flow's offer rows, which are read for one
+        # purpose: ordering them, so that the rounding remainder goes to the row that was
+        # activated last. A constant offset moves every row by the same amount and reorders
+        # none of them, so a zone that is an hour out here changes no share — whereas one
+        # that is an hour out where "today" is decided changes which day is reported.
         self._zone = zone
 
     @override
@@ -140,6 +149,18 @@ class HttpKeitaroAdmin(KeitaroAdminPort):
             refused = f"flow {stream_id} did not take the push: {'; '.join(disagreements)}"
             raise UpstreamProtocolError(refused)
         return written
+
+    @override
+    async def get_time_zone(self) -> str | None:
+        """Read the tracker's own zone off a path the published schema has never declared.
+
+        `GET /settings` is in no part of the document (2.5 asks the live tracker whether it
+        answers at all), so this raises like anything else when the tracker refuses — and
+        `application/time_zone.py` treats that refusal as "the configured zone stands",
+        which is the only sensible reading of a path that may simply not exist.
+        """
+        answered = await self._transport.get(SETTINGS)
+        return to_time_zone(answered.json())
 
     @override
     async def list_offers(self) -> tuple[Offer, ...]:

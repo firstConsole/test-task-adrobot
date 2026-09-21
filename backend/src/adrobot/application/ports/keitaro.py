@@ -97,23 +97,35 @@ class KeitaroAdminPort(ABC):
     async def list_offers(self) -> tuple[Offer, ...]:
         """Read the whole offer catalogue, which is the only way this API offers to read it."""
 
+    @abstractmethod
+    async def get_time_zone(self) -> str | None:
+        """Return the zone the tracker keeps its own clock in, or `None` where it names none.
+
+        The one method here that reads a path the published schema does not have. It raises
+        like every other method when the tracker refuses or cannot be reached — deciding
+        that an absent `/settings` is not a failure is a policy, and it belongs to the
+        caller that has a configured zone to fall back on, not to an adapter.
+        """
+
 
 class KeitaroReportsPort(ABC):
     """The report builder, kept apart so that losing it costs a column and nothing more."""
 
     @abstractmethod
     async def clicks_by_stream(
-        self, campaign_id: KeitaroCampaignId, day: date
+        self, campaign_id: KeitaroCampaignId, day: date, *, timezone: str
     ) -> Mapping[KeitaroStreamId, int]:
-        """Return the clicks each flow of one campaign took on one day, in the tracker's zone.
+        """Return the clicks each flow of one campaign took on one day, in one zone.
 
-        The day is the caller's, and the zone is the tracker's: Keitaro serialises its
-        timestamps without an offset, so a report asked for in the wrong zone answers with
-        somebody else's boundary between yesterday and today.
+        **The day and the zone travel together because neither means anything alone.**
+        Keitaro serialises its timestamps without an offset, so a report asked for in the
+        wrong zone answers with somebody else's boundary between yesterday and today — and
+        an implementation holding a zone of its own would be a second answer to which day
+        this is, silently disagreeing with the caller that worked the date out.
         """
 
     @abstractmethod
     async def clicks_by_offer(
-        self, campaign_id: KeitaroCampaignId, day: date
+        self, campaign_id: KeitaroCampaignId, day: date, *, timezone: str
     ) -> Mapping[OfferId, OfferStats]:
-        """Return the same day grouped by offer — the editor's Stats column, in one call."""
+        """Return the same day in the same zone, grouped by offer — the editor's Stats column."""

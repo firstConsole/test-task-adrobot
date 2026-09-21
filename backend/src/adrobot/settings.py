@@ -186,10 +186,15 @@ def _known_time_zone(name: str) -> str:
     """Resolve the name through `zoneinfo` now, so a typo surfaces at boot and not in stats.
 
     Keitaro serialises timestamps without an offset, in the tracker's own zone (§5.14). An
-    unresolvable name would otherwise first be noticed by a stage-8 report query, as a
-    "clicks today" boundary in the wrong place. Because `validate_default` is on, this
-    also runs against the `"UTC"` default, which is what catches a runtime image built
-    without a tz database.
+    unresolvable name would otherwise first be noticed by a report query, as a "clicks
+    today" boundary in the wrong place. Because `validate_default` is on, this also runs
+    against the `"UTC"` default, which is what catches a runtime image built without a tz
+    database.
+
+    This is the fallback and not the last word: `application/time_zone.py` asks the tracker
+    for its own zone on the first statistics screen and prefers what it answers. It is
+    still worth setting, because `GET /settings` is in no part of the published schema and
+    a build without it leaves this value standing for the life of the process.
 
     `ZoneInfoNotFoundError` subclasses `KeyError`, not `ValueError`, so pydantic would let
     it out raw; it is re-raised as the `ValueError` a field validator is allowed to throw.

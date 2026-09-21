@@ -25,7 +25,7 @@ lets the API rename a field without a use case hearing about it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Final
 
 from adrobot.application.ports.persistence import (
@@ -35,7 +35,7 @@ from adrobot.application.ports.persistence import (
 )
 from adrobot.domain.campaign import public_link
 from adrobot.domain.diff import DraftDiff
-from adrobot.domain.ids import OfferId
+from adrobot.domain.ids import KeitaroStreamId, OfferId
 from adrobot.domain.offer import Offer
 from adrobot.domain.values import CampaignName, CountryCode
 
@@ -194,6 +194,82 @@ class EditorView:
 
     campaign: CampaignView
     streams: tuple[StreamEditorView, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StreamClicks:
+    """What one flow took today — the number the editor prints in the group heading."""
+
+    keitaro_stream_id: KeitaroStreamId
+    clicks: int = 0
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OfferClicks:
+    """What one offer did today, which is the editor's Stats column.
+
+    Conversions ride along because the same report already carries them and a second
+    measure costs no second request. Nothing else does: every measure named in a report is
+    one more name a particular build of the tracker may not know, and one unknown name is
+    answered by rejecting the whole report — so a figure nobody asked for would be paid for
+    with the column going dark.
+    """
+
+    offer_id: OfferId
+    clicks: int = 0
+    conversions: int = 0
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CampaignStats:
+    """One day of the tracker's own numbers for one campaign, in the two groupings drawn.
+
+    Tuples and not the two mappings the port answers with, for this module's own reason:
+    a frozen dataclass holding a `dict` is not frozen. They are ordered by id — not by
+    size, which would be this layer deciding how a column is sorted, and not left in the
+    tracker's order, which is not promised to be stable between two reads of one screen.
+    Nothing reads the order: the screen looks a row up by its id, drawing it where
+    `display_order` already put it.
+
+    **`day` and `timezone` travel with the numbers rather than being left to the reader.**
+    Keitaro serialises its timestamps without an offset, in its own zone, so "clicks today"
+    is not a claim anybody can check until the day and the zone it was worked out in are
+    both printed beside it — and a service and a tracker in different zones disagree about
+    which day today is for several hours of every one of them.
+
+    `read_at` is when this service asked the tracker, and `None` where it never got an
+    answer to date. `unavailable_reason` is set whenever the last attempt failed — beside a
+    `read_at`, it means these numbers are older than they should be; without one, it means
+    there are no numbers. Both are readable through `available` and `stale` below.
+    """
+
+    day: date
+    timezone: str
+    read_at: datetime | None = None
+    unavailable_reason: str | None = None
+    streams: tuple[StreamClicks, ...] = ()
+    offers: tuple[OfferClicks, ...] = ()
+
+    @property
+    def available(self) -> bool:
+        """Whether these rows are the tracker's numbers at all.
+
+        False is not the same answer as no rows: a campaign that took no traffic today has
+        nothing to show and `available` is still true. An empty column that cannot tell the
+        two apart says "zero clicks" about a tracker that was never asked.
+        """
+        return self.read_at is not None
+
+    @property
+    def stale(self) -> bool:
+        """Whether these are the last numbers that could be read rather than today's latest.
+
+        The three states this type has are `available and not stale` (read just now),
+        `available and stale` (read a while ago, and the refresh failed) and neither (the
+        tracker has not answered since this campaign was first looked at). `read_at` dates
+        the rows in the second case, which is what makes serving them honest.
+        """
+        return self.read_at is not None and self.unavailable_reason is not None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

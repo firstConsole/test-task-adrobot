@@ -186,18 +186,23 @@ async def test_a_named_call_can_be_made_to_fail() -> None:
 async def test_the_statistics_are_whatever_the_test_put_there() -> None:
     reports = FakeKeitaroReports(clicks={564221: 7}, stats={3749: OfferStats(clicks=7)})
 
-    assert await reports.clicks_by_stream(KeitaroCampaignId(93212), date(2026, 9, 20)) == {
-        564221: 7
-    }
-    assert await reports.clicks_by_offer(KeitaroCampaignId(93212), date(2026, 9, 20)) == {
+    campaign, day = KeitaroCampaignId(93212), date(2026, 9, 20)
+
+    assert await reports.clicks_by_stream(campaign, day, timezone="UTC") == {564221: 7}
+    assert await reports.clicks_by_offer(campaign, day, timezone="UTC") == {
         3749: OfferStats(clicks=7)
     }
     assert reports.calls == ["clicks_by_stream", "clicks_by_offer"]
+    # What it was asked, and not only which methods: a scenario reading the report for this
+    # machine's date, or in this machine's zone, calls exactly the same two.
+    assert reports.asked == [(campaign, day, "UTC"), (campaign, day, "UTC")]
 
 
 async def test_the_report_builder_can_be_made_to_fall_over_on_its_own() -> None:
     reports = FakeKeitaroReports(clicks={564221: 7})
     reports.failure = UpstreamUnavailableError("report/build is down")
 
+    campaign, day = KeitaroCampaignId(93212), date(2026, 9, 20)
+
     with pytest.raises(UpstreamUnavailableError):
-        await reports.clicks_by_stream(KeitaroCampaignId(93212), date(2026, 9, 20))
+        await reports.clicks_by_stream(campaign, day, timezone="UTC")

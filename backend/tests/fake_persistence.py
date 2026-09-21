@@ -77,15 +77,17 @@ from adrobot.domain.offer import Offer
 from adrobot.domain.shares import OfferRow
 from adrobot.domain.stream import StreamOffer
 from adrobot.domain.values import OfferState
-from tests.fakes import FakeKeitaroAdmin
+from tests.fakes import FakeKeitaroAdmin, FakeKeitaroReports
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Collection, Iterable, Mapping
     from contextlib import AbstractAsyncContextManager
+    from datetime import date
 
     from adrobot.application.ports.persistence import CampaignSetup
     from adrobot.application.ports.system import Clock
     from adrobot.domain.campaign import Campaign, CampaignSetupStatus
+    from adrobot.domain.offer import OfferStats
     from adrobot.domain.stream import Stream
     from adrobot.domain.values import Share
 
@@ -682,3 +684,30 @@ class WatchesTheDatabase(FakeKeitaroAdmin):
     def _called(self, method: str) -> None:
         assert not self._uow.open, f"{method} was called with a database transaction open"
         super()._called(method)
+
+
+class ReportsThatWatchTheDatabase(FakeKeitaroReports):
+    """The same rule for the report builder, which is where it costs the most.
+
+    A statistics screen is the one thing on this API that is asked for again every few
+    seconds, and `/report/build` is the slowest endpoint the tracker has. A connection held
+    across those two calls is therefore not a rare pathology — it is the pool emptying under
+    exactly the load the column was built for.
+    """
+
+    def __init__(
+        self,
+        uow: FakeUnitOfWork,
+        *,
+        clicks: Mapping[int, int] = {},
+        stats: Mapping[int, OfferStats] = {},
+    ) -> None:
+        super().__init__(clicks=clicks, stats=stats)
+        self._uow = uow
+
+    @override
+    def _called(
+        self, method: str, campaign_id: KeitaroCampaignId, day: date, timezone: str
+    ) -> None:
+        assert not self._uow.open, f"{method} was called with a database transaction open"
+        super()._called(method, campaign_id, day, timezone)

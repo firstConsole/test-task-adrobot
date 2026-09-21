@@ -107,6 +107,10 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         # accepts on a write and declines to give back — `domain_id` above all.
         self.blueprints: list[CampaignBlueprint] = []
         self.streams: dict[KeitaroStreamId, Stream] = {}
+        # What `GET /settings` names as the tracker's zone. `None` by default, which is
+        # both the build that has no such path and the one that answers without the field
+        # — and in either case the configured zone is what a caller ends up with.
+        self.time_zone: str | None = None
         # What was asked of it, in order, for a scenario that cares how many times.
         self.calls: list[str] = []
         # Method name to the failure it should raise instead of answering.
@@ -251,6 +255,11 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         return written
 
     @override
+    async def get_time_zone(self) -> str | None:
+        self._called("get_time_zone")
+        return self.time_zone
+
+    @override
     async def list_offers(self) -> tuple[Offer, ...]:
         self._called("list_offers")
         return tuple(self.offers)
@@ -311,26 +320,33 @@ class FakeKeitaroReports(KeitaroReportsPort):
         self.clicks = {KeitaroStreamId(key): value for key, value in clicks.items()}
         self.stats = {OfferId(key): value for key, value in stats.items()}
         self.calls: list[str] = []
+        # Which campaign, and which day. Separate from `calls` because it answers the other
+        # half of the question: a scenario that read the report for this machine's date
+        # instead of the tracker's calls exactly the same methods in exactly the same order.
+        self.asked: list[tuple[KeitaroCampaignId, date, str]] = []
         # The tracker's report builder is the part that falls over first, and a screen that
         # loses its Stats column while the editor keeps working is what 8.2 has to do.
         self.failure: Exception | None = None
 
     @override
     async def clicks_by_stream(
-        self, campaign_id: KeitaroCampaignId, day: date
+        self, campaign_id: KeitaroCampaignId, day: date, *, timezone: str
     ) -> Mapping[KeitaroStreamId, int]:
-        self._called("clicks_by_stream")
+        self._called("clicks_by_stream", campaign_id, day, timezone)
         return dict(self.clicks)
 
     @override
     async def clicks_by_offer(
-        self, campaign_id: KeitaroCampaignId, day: date
+        self, campaign_id: KeitaroCampaignId, day: date, *, timezone: str
     ) -> Mapping[OfferId, OfferStats]:
-        self._called("clicks_by_offer")
+        self._called("clicks_by_offer", campaign_id, day, timezone)
         return dict(self.stats)
 
-    def _called(self, method: str) -> None:
+    def _called(
+        self, method: str, campaign_id: KeitaroCampaignId, day: date, timezone: str
+    ) -> None:
         self.calls.append(method)
+        self.asked.append((campaign_id, day, timezone))
         if self.failure is not None:
             raise self.failure
 

@@ -16,7 +16,11 @@ import httpx
 import pytest
 import respx
 
-from adrobot.application.errors import UpstreamDeniedError, UpstreamProtocolError
+from adrobot.application.errors import (
+    UpstreamDeniedError,
+    UpstreamNotFoundError,
+    UpstreamProtocolError,
+)
 from adrobot.domain.campaign import CampaignBlueprint
 from adrobot.domain.diff import DesiredOffer
 from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
@@ -373,3 +377,53 @@ async def test_a_flow_written_back_wholesale_keeps_its_own_identity(
         await admin.update_stream(STREAM_ID, spec)
 
     assert _sent(route)["campaign_id"] == CAMPAIGN_ID
+
+
+@pytest.mark.parametrize("key", ["timezone", "time_zone"])
+async def test_the_trackers_own_zone_is_read_under_either_spelling(
+    admin: HttpKeitaroAdmin, key: str
+) -> None:
+    async with respx.mock(base_url=BASE) as mock:
+        mock.get("/settings").mock(
+            return_value=httpx.Response(200, json={key: "Europe/Madrid", "version": "9.14"})
+        )
+
+        assert await admin.get_time_zone() == "Europe/Madrid"
+
+
+async def test_a_settings_object_is_read_for_the_zone_and_for_nothing_else(
+    admin: HttpKeitaroAdmin,
+) -> None:
+    async with respx.mock(base_url=BASE) as mock:
+        # A real settings object carries a licence key and whatever else the build keeps
+        # there. `extra="ignore"` is what makes reading one for a single field safe.
+        mock.get("/settings").mock(
+            return_value=httpx.Response(
+                200, json={"timezone": "Europe/Madrid", "license_key": "not-ours-to-hold"}
+            )
+        )
+
+        zone = await admin.get_time_zone()
+
+    assert zone == "Europe/Madrid"
+
+
+async def test_a_build_that_names_no_zone_answers_none_rather_than_failing(
+    admin: HttpKeitaroAdmin,
+) -> None:
+    async with respx.mock(base_url=BASE) as mock:
+        mock.get("/settings").mock(return_value=httpx.Response(200, json={"version": "9.14"}))
+
+        assert await admin.get_time_zone() is None
+
+
+async def test_a_build_without_the_path_at_all_raises_like_any_other_refusal(
+    admin: HttpKeitaroAdmin,
+) -> None:
+    async with respx.mock(base_url=BASE) as mock:
+        mock.get("/settings").mock(return_value=httpx.Response(404))
+
+        # The adapter maps; deciding that a missing undocumented path is survivable belongs
+        # to `application/time_zone.py`, which has a configured zone to fall back on.
+        with pytest.raises(UpstreamNotFoundError):
+            await admin.get_time_zone()
