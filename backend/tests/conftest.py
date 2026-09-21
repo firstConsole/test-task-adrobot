@@ -31,6 +31,7 @@ from tests.helpers import (
     VALID_ENVIRONMENT,
     Statements,
 )
+from tests.wiring import FakeWorld, fake_ports_factory, fake_world
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -129,9 +130,20 @@ def log_stream() -> StringIO:
 
 
 @pytest.fixture
-def app(settings: Settings) -> FastAPI:
-    """The application under test, built from the fixture settings."""
-    return create_app(settings=settings)
+def world() -> FakeWorld:
+    """The fakes one application is served from, reachable by the test that drives it.
+
+    One per test and shared by every request that test makes, which is what a pool and a
+    tracker client are in production: a campaign created by one request is there for the
+    next one to read.
+    """
+    return fake_world()
+
+
+@pytest.fixture
+def app(settings: Settings, world: FakeWorld) -> FastAPI:
+    """The application under test, built from the fixture settings over the fixture fakes."""
+    return create_app(settings=settings, ports_factory=fake_ports_factory(world.ports))
 
 
 @pytest.fixture
@@ -142,9 +154,16 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     `filterwarnings = ["error"]`, and importing TestClient trips a starlette deprecation
     under httpx 0.x — a *collection* error, which aborts the whole run rather than one
     test.
+
+    The lifespan is entered by hand because `ASGITransport` is not a server and never sends
+    the `lifespan` messages one does — so without this the ports would never be composed and
+    every dependency that reads them would answer 500.
     """
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://adrobot.test") as http:
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://adrobot.test") as http,
+    ):
         yield http
 
 
@@ -304,11 +323,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 # Deliberately not here yet, and which stage brings it:
 #
-#   6.x   fixtures over tests/fakes.py. The fakes themselves arrived at 4.8; a fixture
-#         for one belongs in the commit that brings the first scenario to build on it,
-#         because what a scenario wants configured is not knowable before there is one.
-#   6.6   a `client` that runs the lifespan. ASGITransport does not run one, and there is
-#         still none to run: 4.3 gave the tracker client its own context manager instead
-#         of an application lifespan. The day create_app takes a ports factory, this
-#         becomes `async with app.router.lifespan_context(app): yield http`.
-#   6.8   an `authorised_client` carrying the shared token.
+#   7.x   a fixture for a campaign with a live draft. The editor is the first thing that
+#         wants one, and what a draft should be seeded with is not knowable before there is
+#         a scenario editing it.
+#
+# What used to be on this list and has arrived: the `world` of fakes above (6.6), the
+# `client` that enters the lifespan by hand (6.6) and the shared token, which is a header a
+# test module sets on the client it was handed rather than a second client fixture — one
+# line where a fixture would have been a second thing to keep in step with `Settings`.

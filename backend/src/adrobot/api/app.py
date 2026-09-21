@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from importlib import metadata
 from typing import TYPE_CHECKING, Final
 
@@ -9,11 +10,20 @@ from fastapi import FastAPI
 from starlette.middleware import Middleware
 from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
+from adrobot.api.errors import install_error_handlers
 from adrobot.api.middleware import AccessLogMiddleware, CorrelationIdMiddleware
-from adrobot.api.routers import health
+from adrobot.api.routers import campaigns, health
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable
+    from contextlib import AbstractAsyncContextManager
+
+    from starlette.types import Lifespan
+
+    from adrobot.composition import AppPorts
     from adrobot.settings import Settings
+
+    PortsFactory = Callable[[Settings], AbstractAsyncContextManager[AppPorts]]
 
 # The largest legitimate body on this API is a batch of draft operations — a few hundred
 # offer ids (PLAN-BACKEND §8). A constant and not an `ADROBOT_` variable: it is not
@@ -22,7 +32,7 @@ if TYPE_CHECKING:
 MAX_REQUEST_BODY_BYTES: Final = 1024 * 1024
 
 
-def create_app(*, settings: Settings) -> FastAPI:
+def create_app(*, settings: Settings, ports_factory: PortsFactory) -> FastAPI:
     """Build the HTTP application from an already-validated configuration.
 
     Pure with respect to the process: it reads no environment variable, opens no socket
@@ -32,14 +42,20 @@ def create_app(*, settings: Settings) -> FastAPI:
 
     Keyword-only, and staying that way. PLAN-BACKEND §1 sketches
     `create_app(ports_factory, settings)`; positional parameters in that order would make
-    6.6 rewrite every call site to insert a first argument, and would put `ports_factory`
-    ahead of `settings` two stages before ports exist. 6.6 adds one keyword-only parameter
-    beside this one and no call site changes.
+    this stage rewrite every call site to insert a first argument, and would have put
+    `ports_factory` ahead of `settings` two stages before ports existed.
+
+    `ports_factory` is a factory and not the ports themselves: what it builds is a client, a
+    connection pool and a cache, all of which belong to a *running* application and none of
+    which may be opened by a function a test calls four times in one process. It is entered
+    by the lifespan below, so this factory still opens nothing and still never learns that a
+    socket exists.
     """
     # `/docs` is an unauthenticated console pointed at an API whose tracker key can spend
     # money, and the frontend generates its types from a dev or CI run (9.6), never from
     # the deployed service. Derived from `env` rather than from a knob of its own, for the
-    # same reason as the constant above.
+    # same reason as the constant above — and the same reading decides whether a 5xx says
+    # what went wrong or only gives out its correlation id.
     docs_enabled = settings.env != "prod"
 
     app = FastAPI(
@@ -68,12 +84,34 @@ def create_app(*, settings: Settings) -> FastAPI:
             # Note for 6.7: it answers `text/plain`, not `application/problem+json`.
             Middleware(RequestBodyLimitMiddleware, max_body_size=MAX_REQUEST_BODY_BYTES),
         ],
-        # Still no `lifespan`, and from 4.3 that is a decision rather than an absence of
-        # anything to hold open. The tracker client has an owner of its own —
-        # `keitaro_transport(settings)`, in infrastructure/keitaro/transport.py — so the
-        # resource's lifetime lives in the module that knows what the resource is. 6.6
-        # wraps that in `async with ports_factory(settings) as ports` and hands the ports
-        # in; this factory still never learns that a socket exists.
+        lifespan=_composed(ports_factory, settings),
     )
+    # Put on the application at construction and not in the lifespan below: settings are
+    # decided before anything runs and hold no resource, so a dependency that needs one —
+    # the token check of 6.8 — must not be hostage to a lifespan having started.
+    app.state.settings = settings
+    # Every failure of this API is rendered here and in no router: the detail of a 5xx is
+    # withheld outside dev, on the same reading of `env` as the docs above.
+    install_error_handlers(app, expose_internals=docs_enabled)
     app.include_router(health.router)
+    app.include_router(campaigns.router)
     return app
+
+
+def _composed(ports_factory: PortsFactory, settings: Settings) -> Lifespan[FastAPI]:
+    """Hold the process's resources open for as long as the application is serving.
+
+    What the block yields is put on `app.state` rather than returned as the state mapping a
+    lifespan may hand back. That mapping is copied into each request scope by the *server*,
+    and the suite drives this application through `httpx.ASGITransport`, which is not a
+    server; `scope["app"]` is set by Starlette itself, so `app.state` is the one place a
+    dependency can read under uvicorn and under a test alike.
+    """
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        async with ports_factory(settings) as ports:
+            app.state.ports = ports
+            yield
+
+    return lifespan

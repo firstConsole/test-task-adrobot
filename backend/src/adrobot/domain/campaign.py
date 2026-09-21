@@ -16,9 +16,37 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Final
 
-from adrobot.domain.ids import KeitaroCampaignId
-from adrobot.domain.values import CampaignAlias, CampaignName
+from adrobot.domain.diff import DesiredOffer
+from adrobot.domain.ids import KeitaroCampaignId, OfferId
+from adrobot.domain.shares import OfferRow, redistribute
+from adrobot.domain.stream import (
+    FilterMode,
+    StreamFilter,
+    StreamSchema,
+    StreamSpec,
+    StreamType,
+)
+from adrobot.domain.values import CampaignAlias, CampaignName, CountryCode, OfferState
+
+GEO_REDIRECT_URL: Final = "https://google.com"
+"""Where Flow 1 sends the traffic it catches. The task names this address, so it is a
+constant of the specification and not a default somebody may one day want to configure."""
+
+GEO_FILTER: Final = "country"
+"""The tracker's own name for the condition Flow 1 filters on."""
+
+HTTP_ACTION: Final = "http"
+"""The action type both flows are created with. Flow 2 rotates offers and does nothing with
+an action at all, but `action_type` is sent for it too: the published schema marks no field
+of a flow as required, which is the schema declining to say, and a create refused for a
+missing field would be found on a reviewer's first campaign."""
+
+FIRST_FLOW: Final = "Flow 1"
+SECOND_FLOW: Final = "Flow 2"
+"""The names from the reference campaign, spelled exactly as the video shows them: this is
+the first thing anyone compares, and matching it costs nothing."""
 
 
 class CampaignRotation(Enum):
@@ -136,3 +164,58 @@ class ReferenceData:
     campaign_groups: tuple[Group, ...] = ()
     traffic_sources: tuple[TrafficSource, ...] = ()
     domains: tuple[TrackerDomain, ...] = ()
+
+
+def public_link(domain: str, alias: str) -> str:
+    """Build a campaign's public link from the domain it was created on and its alias.
+
+    Assembled here because the tracker will not assemble it: `Campaign` carries no
+    `domain_id`, so the only moment this is knowable is the create, and the only place it is
+    stored is our own row. `https` and not the domain's own `is_ssl`, which this service
+    does not read: every Keitaro domain this wrapper can reach is one its own settings
+    already insist be https, and an http link printed into a browser would be the wrong
+    half of the guess.
+    """
+    return f"https://{domain}/{alias}"
+
+
+def flows_for(
+    campaign_id: KeitaroCampaignId, *, country: CountryCode, offer_id: OfferId
+) -> tuple[StreamSpec, StreamSpec]:
+    """Describe the two flows part 1 builds, in the order they are dispatched in.
+
+    Flow 1 catches the campaign's own country and sends it away; Flow 2 takes everything
+    else and rotates the offers, which is the flow part 2 then edits. The campaign's
+    rotation is `position`, so the order below is the behaviour and not a presentation
+    detail — Flow 1 is tried first because its position says 1.
+
+    The single offer's share goes through `redistribute()` rather than being written as
+    100. It is one row and the answer is not in doubt; what is in doubt is the next person
+    to touch this function, and the rule they must not break is that no share in this
+    service is arrived at anywhere but in `shares.py`.
+    """
+    seeded = redistribute((OfferRow(offer_id=offer_id, seq=0, activated_at=0),))
+    return (
+        StreamSpec(
+            campaign_id=campaign_id,
+            name=FIRST_FLOW,
+            type=StreamType.REGULAR,
+            schema=StreamSchema.REDIRECT,
+            action_type=HTTP_ACTION,
+            position=1,
+            action_payload=GEO_REDIRECT_URL,
+            filters=(StreamFilter(name=GEO_FILTER, mode=FilterMode.ACCEPT, payload=(country,)),),
+        ),
+        StreamSpec(
+            campaign_id=campaign_id,
+            name=SECOND_FLOW,
+            type=StreamType.REGULAR,
+            schema=StreamSchema.LANDINGS,
+            action_type=HTTP_ACTION,
+            position=2,
+            offers=tuple(
+                DesiredOffer(offer_id=row.offer_id, share=row.share, state=OfferState.ACTIVE)
+                for row in seeded
+            ),
+        ),
+    )

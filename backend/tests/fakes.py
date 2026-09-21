@@ -1,4 +1,4 @@
-"""The second implementation of the Keitaro ports, in memory.
+"""The second implementation of the ports, in memory.
 
 A port with one implementation is a layer of indirection; a port with two is a boundary.
 This is the second, and writing it is what proves the first one's signatures are about what
@@ -20,6 +20,10 @@ behaviour those scenarios turn on, and no more:
 
 What it does not model is transport: no retries, no statuses, no redirects. Those are the
 adapter's own, and `tests/infrastructure/` exercises them against respx.
+
+`FakeClock` is here for the same reason as the rest and not because it is about Keitaro: a
+scenario that has to say "five minutes and one second later" — the reference cache of 6.2 —
+would otherwise say it by sleeping.
 """
 
 from __future__ import annotations
@@ -31,16 +35,29 @@ from typing import TYPE_CHECKING, override
 
 from adrobot.application.errors import UpstreamNotFoundError
 from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPort
-from adrobot.domain.campaign import Campaign, Group, ReferenceData, TrackerDomain, TrafficSource
+from adrobot.application.ports.system import AliasFactory, Clock
+from adrobot.domain.campaign import (
+    Campaign,
+    CampaignBlueprint,
+    Group,
+    ReferenceData,
+    TrackerDomain,
+    TrafficSource,
+)
 from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
-from adrobot.domain.stream import Stream, StreamOffer
-from adrobot.domain.values import OfferState
+from adrobot.domain.stream import (
+    Stream,
+    StreamFilter,
+    StreamOffer,
+    StreamSchema,
+    StreamType,
+)
+from adrobot.domain.values import CampaignAlias, OfferState
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date
 
-    from adrobot.domain.campaign import CampaignBlueprint
     from adrobot.domain.diff import DesiredOffer
     from adrobot.domain.offer import Offer, OfferStats
     from adrobot.domain.stream import StreamSpec
@@ -50,6 +67,18 @@ if TYPE_CHECKING:
 FIRST_CAMPAIGN_ID = 93212
 FIRST_STREAM_ID = 564221
 FIRST_MOMENT = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+REFERENCE_OFFERS = (OfferId(11112), OfferId(11234))
+
+
+def _issuing_after(ids: count[int], given: int) -> count[int]:
+    """Move an id counter past one that was handed in, so a create cannot reissue it.
+
+    The video's identifiers are the ones a test seeds with, and they are also where these
+    counters start: without this, a scenario that seeds flow 564221 and then creates one
+    would get 564221 back and silently overwrite the flow it was editing.
+    """
+    return count(max(next(ids), given + 1))
+
 
 DEFAULT_REFERENCE = ReferenceData(
     campaign_groups=(Group(id=7, name="AD Robot"),),
@@ -74,6 +103,9 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         self.reference = reference
         self.offers = list(offers)
         self.campaigns: dict[KeitaroCampaignId, Campaign] = {}
+        # What it was ASKED to create, which is the only record of the fields the tracker
+        # accepts on a write and declines to give back — `domain_id` above all.
+        self.blueprints: list[CampaignBlueprint] = []
         self.streams: dict[KeitaroStreamId, Stream] = {}
         # What was asked of it, in order, for a scenario that cares how many times.
         self.calls: list[str] = []
@@ -88,6 +120,12 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         """Make one method raise until a test says otherwise."""
         self.failures[method] = error
 
+    def given_campaign(self, campaign: Campaign) -> Campaign:
+        """Put a campaign into the tracker as if somebody had built it by hand."""
+        self.campaigns[campaign.id] = campaign
+        self._campaign_ids = _issuing_after(self._campaign_ids, campaign.id)
+        return campaign
+
     def given_stream(self, stream: Stream) -> Stream:
         """Put a flow into the tracker as if somebody had built it by hand.
 
@@ -95,6 +133,7 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         among them — so a scenario needs a way to say "this was already there".
         """
         self.streams[stream.id] = stream
+        self._stream_ids = _issuing_after(self._stream_ids, stream.id)
         return stream
 
     @override
@@ -114,6 +153,7 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
     @override
     async def create_campaign(self, blueprint: CampaignBlueprint) -> Campaign:
         self._called("create_campaign")
+        self.blueprints.append(blueprint)
         campaign = Campaign(
             id=KeitaroCampaignId(next(self._campaign_ids)),
             alias=str(blueprint.alias),
@@ -288,3 +328,91 @@ class FakeKeitaroReports(KeitaroReportsPort):
         self.calls.append(method)
         if self.failure is not None:
             raise self.failure
+
+
+class FakeClock(Clock):
+    """A clock that moves only when a test moves it."""
+
+    def __init__(self, at: datetime = FIRST_MOMENT) -> None:
+        self.at = at
+
+    @override
+    def now(self) -> datetime:
+        return self.at
+
+    def advance(self, by: timedelta) -> None:
+        """Move the clock forward, which is the whole reason this exists."""
+        self.at += by
+
+
+class FakeAliasFactory(AliasFactory):
+    """Aliases a test can predict, numbered in the order they were handed out."""
+
+    def __init__(self, stem: str = "kt-alias") -> None:
+        self.stem = stem
+        self.issued: list[CampaignAlias] = []
+
+    @override
+    def new(self) -> CampaignAlias:
+        alias = CampaignAlias(f"{self.stem}-{len(self.issued) + 1}")
+        self.issued.append(alias)
+        return alias
+
+
+def given_reference_campaign(admin: FakeKeitaroAdmin) -> Campaign:
+    """Seed the tracker with campaign 93212 and its two flows, as the video shows them.
+
+    The one campaign a reviewer is most likely to open, and the fixture part 2 is written
+    against. Flow 2's two offers hold 25% each: the shares of a flow nobody has recalculated
+    do not have to sum to 100, and every scenario that touches this campaign has to survive
+    that.
+    """
+    campaign = admin.given_campaign(
+        Campaign(
+            id=KeitaroCampaignId(FIRST_CAMPAIGN_ID),
+            alias="Gd7Hk2",
+            name="AU | Oxys",
+            state="active",
+        )
+    )
+    admin.given_stream(
+        Stream(
+            id=KeitaroStreamId(FIRST_STREAM_ID),
+            campaign_id=campaign.id,
+            name="Flow 1",
+            type=StreamType.REGULAR,
+            schema=StreamSchema.REDIRECT,
+            action_type="http",
+            position=1,
+            action_payload="https://google.com",
+            filters=(StreamFilter(id=9, name="country", mode="accept", payload=("AU",)),),
+        )
+    )
+    admin.given_stream(
+        Stream(
+            id=KeitaroStreamId(FIRST_STREAM_ID + 1),
+            campaign_id=campaign.id,
+            name="Flow 2",
+            type=StreamType.REGULAR,
+            schema=StreamSchema.LANDINGS,
+            action_type="http",
+            position=2,
+            offers=(
+                StreamOffer(
+                    offer_id=REFERENCE_OFFERS[0],
+                    share=25,
+                    state="active",
+                    row_id=1,
+                    created_at=FIRST_MOMENT,
+                ),
+                StreamOffer(
+                    offer_id=REFERENCE_OFFERS[1],
+                    share=25,
+                    state="active",
+                    row_id=2,
+                    created_at=FIRST_MOMENT + timedelta(days=1),
+                ),
+            ),
+        )
+    )
+    return campaign
