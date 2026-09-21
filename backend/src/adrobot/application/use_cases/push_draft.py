@@ -56,11 +56,8 @@ from adrobot.application.errors import (
     UpstreamUnavailableError,
 )
 from adrobot.application.push import PushOutcome
-from adrobot.application.use_cases.edit_draft import (
-    refuse_a_flow_that_rotates_nothing,
-    rendered,
-)
-from adrobot.application.use_cases.editor import block_reason
+from adrobot.application.use_cases.edit_draft import refuse_a_flow_that_rotates_nothing
+from adrobot.application.use_cases.editor import block_reason, rendered
 from adrobot.domain.diff import DesiredOffer, DraftDiff, desired_state, snapshot_hash
 from adrobot.domain.draft import DraftStatus
 from adrobot.domain.ids import DraftId, PushAttemptId

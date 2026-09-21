@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from adrobot.application.use_cases.edit_draft import refuse_a_flow_that_rotates_nothing, rendered
-from adrobot.application.use_cases.editor import rows_on_screen
+from adrobot.application.use_cases.edit_draft import refuse_a_flow_that_rotates_nothing
+from adrobot.application.use_cases.editor import rendered, rows_on_screen
 from adrobot.domain.shares import pin, redistribute
 from adrobot.domain.values import Share
 

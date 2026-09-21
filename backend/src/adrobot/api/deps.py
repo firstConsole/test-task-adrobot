@@ -22,8 +22,13 @@ from fastapi import Depends, Request
 
 from adrobot.application.ports.persistence import UnitOfWork
 from adrobot.application.use_cases.create_campaign import CreateCampaign, RepairCampaign
+from adrobot.application.use_cases.edit_draft import DiscardDraft, EditDraft
+from adrobot.application.use_cases.editor import GetEditorView, GetStreamView
 from adrobot.application.use_cases.list_campaigns import ListCampaigns
 from adrobot.application.use_cases.mirror_campaign import ImportCampaign, SyncCampaign
+from adrobot.application.use_cases.offer_catalogue import SearchOffers, SyncOfferCatalogue
+from adrobot.application.use_cases.pin_offer import ReleaseOfferPin, SetOfferPin
+from adrobot.application.use_cases.push_draft import PushDraft
 from adrobot.composition import AppPorts
 from adrobot.settings import Settings
 
@@ -106,6 +111,53 @@ def _list_campaigns(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> ListC
     return ListCampaigns(uow=uow)
 
 
+# The editor. Every one of these but the push holds a unit of work and nothing else: staging
+# an edit, pinning a row and cancelling never reach the tracker, which is what makes them
+# answer in one short transaction and no network call.
+
+
+def _editor_view(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> GetEditorView:
+    return GetEditorView(uow=uow)
+
+
+def _stream_view(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> GetStreamView:
+    return GetStreamView(uow=uow)
+
+
+def _edit_draft(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> EditDraft:
+    return EditDraft(uow=uow)
+
+
+def _discard_draft(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> DiscardDraft:
+    return DiscardDraft(uow=uow)
+
+
+def _set_offer_pin(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> SetOfferPin:
+    return SetOfferPin(uow=uow)
+
+
+def _release_offer_pin(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> ReleaseOfferPin:
+    return ReleaseOfferPin(uow=uow)
+
+
+def _push_draft(
+    ports: Annotated[AppPorts, Depends(_ports)],
+    uow: Annotated[UnitOfWork, Depends(_unit_of_work)],
+) -> PushDraft:
+    return PushDraft(admin=ports.admin, uow=uow, clock=ports.clock, correlation=ports.correlation)
+
+
+def _search_offers(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> SearchOffers:
+    return SearchOffers(uow=uow)
+
+
+def _sync_offer_catalogue(
+    ports: Annotated[AppPorts, Depends(_ports)],
+    uow: Annotated[UnitOfWork, Depends(_unit_of_work)],
+) -> SyncOfferCatalogue:
+    return SyncOfferCatalogue(admin=ports.admin, uow=uow, clock=ports.clock)
+
+
 PortsDep = Annotated[AppPorts, Depends(_ports)]
 SettingsDep = Annotated[Settings, Depends(_settings)]
 # `UnitOfWork` is imported above and not under `TYPE_CHECKING`, which is the whole reason
@@ -123,3 +175,13 @@ RepairCampaignDep = Annotated[RepairCampaign, Depends(_repair_campaign)]
 ImportCampaignDep = Annotated[ImportCampaign, Depends(_import_campaign)]
 SyncCampaignDep = Annotated[SyncCampaign, Depends(_sync_campaign)]
 ListCampaignsDep = Annotated[ListCampaigns, Depends(_list_campaigns)]
+
+GetEditorViewDep = Annotated[GetEditorView, Depends(_editor_view)]
+GetStreamViewDep = Annotated[GetStreamView, Depends(_stream_view)]
+EditDraftDep = Annotated[EditDraft, Depends(_edit_draft)]
+DiscardDraftDep = Annotated[DiscardDraft, Depends(_discard_draft)]
+SetOfferPinDep = Annotated[SetOfferPin, Depends(_set_offer_pin)]
+ReleaseOfferPinDep = Annotated[ReleaseOfferPin, Depends(_release_offer_pin)]
+PushDraftDep = Annotated[PushDraft, Depends(_push_draft)]
+SearchOffersDep = Annotated[SearchOffers, Depends(_search_offers)]
+SyncOfferCatalogueDep = Annotated[SyncOfferCatalogue, Depends(_sync_offer_catalogue)]

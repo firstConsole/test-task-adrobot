@@ -25,8 +25,8 @@ from adrobot.domain.shares import display_order
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
-    from adrobot.application.ports.persistence import StreamView, UnitOfWork
-    from adrobot.domain.ids import CampaignId, OfferId
+    from adrobot.application.ports.persistence import StreamView, Transaction, UnitOfWork
+    from adrobot.domain.ids import CampaignId, KeitaroStreamId, OfferId
     from adrobot.domain.offer import Offer
     from adrobot.domain.shares import OfferRow
 
@@ -143,6 +143,41 @@ def offer_ids_of(views: Iterable[StreamView]) -> set[OfferId]:
     mirror yet, and it is the row whose label the person is most likely to be looking at.
     """
     return {row.offer_id for view in views for row in (*view.mirror_rows, *rows_on_screen(view))}
+
+
+async def rendered(transaction: Transaction, view: StreamView) -> StreamEditorView:
+    """Draw one flow for an answer, labelling its rows out of the catalogue.
+
+    Every scenario that changes a flow ends here, so the body a client redraws itself from
+    is assembled once however it was reached — an edit, a pin, a cancel, a push.
+    """
+    return stream_view(view, await transaction.offers.by_ids(offer_ids_of((view,))))
+
+
+class GetStreamView:
+    """One flow on its own, which is the dry run behind PREVIEW.
+
+    A separate scenario from the screenful above because it answers a different question:
+    not "draw this campaign" but "show me, without writing anything, exactly what pressing
+    PUSH would send". The payload it carries is `diff.desired`, the same tuple the push
+    hands the tracker — so this is a rehearsal and not a description of one.
+    """
+
+    def __init__(self, *, uow: UnitOfWork) -> None:
+        self._uow = uow
+
+    async def __call__(
+        self, *, campaign_id: CampaignId, stream_id: KeitaroStreamId
+    ) -> StreamEditorView:
+        """Read one flow whole. Raises `StreamNotFoundError`, as another campaign's flow does."""
+        async with self._uow.begin() as transaction:
+            # `lock` and not an unlocked read, because the port offers no unlocked one: a
+            # single-flow read that could forget its campaign is a read that answers about
+            # somebody else's flow, so the only one on offer takes both.
+            return await rendered(
+                transaction,
+                await transaction.streams.lock(campaign_id=campaign_id, stream_id=stream_id),
+            )
 
 
 class GetEditorView:

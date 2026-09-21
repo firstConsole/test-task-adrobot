@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from adrobot.application.errors import DraftBeingPushedError, StreamDoesNotRotateOffersError
-from adrobot.application.use_cases.editor import offer_ids_of, stream_view
+from adrobot.application.use_cases.editor import rendered
 from adrobot.domain.diff import snapshot_hash
 from adrobot.domain.draft import DraftOperationKind, DraftStatus, StreamDraft
 from adrobot.domain.stream import StreamSchema
@@ -32,8 +32,6 @@ if TYPE_CHECKING:
     from adrobot.application.ports.persistence import (
         LiveDraft,
         MirroredStream,
-        StreamView,
-        Transaction,
         UnitOfWork,
     )
     from adrobot.domain.draft import DraftOperation
@@ -67,11 +65,6 @@ def refuse_a_draft_in_flight(stream_id: KeitaroStreamId, draft: LiveDraft | None
     """Refuse to touch a draft the push has already taken, which is what `pushing` means."""
     if draft is not None and draft.status is not DraftStatus.OPEN:
         raise DraftBeingPushedError(stream_id)
-
-
-async def rendered(transaction: Transaction, view: StreamView) -> StreamEditorView:
-    """Draw one flow for the answer, labelling its rows out of the catalogue."""
-    return stream_view(view, await transaction.offers.by_ids(offer_ids_of((view,))))
 
 
 class EditDraft:
