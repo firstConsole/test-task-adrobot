@@ -1,4 +1,5 @@
-import { ExternalLinkIcon } from 'lucide-react'
+import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 
 import { useCampaignStreams } from '@/entities/stream'
@@ -6,9 +7,17 @@ import { FetchStreamsButton } from '@/features/sync-streams'
 import { ApiError } from '@/shared/api/client'
 import { ROUTES } from '@/shared/config/routes'
 import { problemMessage } from '@/shared/lib/problem-message'
+import { relativeTime } from '@/shared/lib/relative-time'
 import { Button } from '@/shared/ui/button'
 import { Table } from '@/shared/ui/table'
-import { COLUMN_COUNT, OfferTableHead, StreamGroup } from '@/widgets/stream-group'
+import {
+  COLUMN_COUNT,
+  OfferTableHead,
+  StreamGroup,
+  StreamGroupSkeleton,
+} from '@/widgets/stream-group'
+
+const SKELETON_GROUPS = [0, 1]
 
 export function CampaignStreamsPage() {
   const { campaignId } = useParams<'campaignId'>()
@@ -20,16 +29,37 @@ export function CampaignStreamsPage() {
   return <CampaignStreams campaignId={campaignId} />
 }
 
+function Frame({ children }: { children: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-lg border">
+      <Table>
+        <OfferTableHead />
+        {children}
+      </Table>
+    </div>
+  )
+}
+
 function CampaignStreams({ campaignId }: { campaignId: string }) {
   const streams = useCampaignStreams(campaignId)
 
   if (streams.isPending) {
-    return <p className="text-muted-foreground text-sm">Reading the flows…</p>
+    return (
+      <section className="space-y-4" aria-busy>
+        <p className="sr-only" role="status">
+          Reading the flows…
+        </p>
+        <Frame>
+          {SKELETON_GROUPS.map((group) => (
+            <StreamGroupSkeleton key={group} />
+          ))}
+        </Frame>
+      </section>
+    )
   }
 
   if (streams.isError) {
-    const correlationId =
-      streams.error instanceof ApiError ? streams.error.correlationId : null
+    const correlationId = streams.error instanceof ApiError ? streams.error.correlationId : null
     return (
       <p role="alert" className="text-destructive text-sm">
         {problemMessage(streams.error, 'The flows could not be read.')}
@@ -43,7 +73,10 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
   return (
     <section className="space-y-4">
       <nav className="text-muted-foreground flex items-center gap-1.5 text-sm">
-        <Link to={ROUTES.campaignList} className="hover:text-foreground underline-offset-4 hover:underline">
+        <Link
+          to={ROUTES.campaignList}
+          className="hover:text-foreground underline-offset-4 hover:underline"
+        >
           Campaigns
         </Link>
         <span aria-hidden>/</span>
@@ -51,6 +84,21 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
         <span aria-hidden>/</span>
         <span>Keitaro streams</span>
       </nav>
+
+      {campaign.setup_status === 'ready' ? null : (
+        <p
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+          <span>
+            This campaign's flows were never finished in the tracker.
+            {campaign.setup_failure === null || campaign.setup_failure === undefined
+              ? ''
+              : ` ${campaign.setup_failure}`}
+          </span>
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         <FetchStreamsButton campaignId={campaignId} />
@@ -62,24 +110,35 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
             <ExternalLinkIcon />
           </a>
         </Button>
+        {/* When the mirror was last read, stated rather than judged: "stale" would need a
+            threshold this service has no basis to pick, and the button to fix it is right
+            here anyway. */}
+        {campaign.synced_at === null || campaign.synced_at === undefined ? null : (
+          <span className="text-muted-foreground text-xs">
+            mirrored {relativeTime(campaign.synced_at)}
+          </span>
+        )}
       </div>
 
-      <div className="overflow-hidden rounded-lg border">
-        <Table>
-          <OfferTableHead />
-          {flows.length === 0 ? (
-            <tbody>
-              <tr>
-                <td colSpan={COLUMN_COUNT} className="text-muted-foreground p-6 text-center text-sm">
-                  This campaign has no flows in the mirror yet.
-                </td>
-              </tr>
-            </tbody>
-          ) : (
-            flows.map((flow) => <StreamGroup key={flow.keitaro_stream_id} campaignId={campaignId} stream={flow} />)
-          )}
-        </Table>
-      </div>
+      <Frame>
+        {flows.length === 0 ? (
+          <tbody>
+            <tr>
+              <td
+                colSpan={COLUMN_COUNT}
+                className="text-muted-foreground p-6 text-center text-sm"
+              >
+                This campaign has no flows in the mirror yet. FETCH STREAMS FROM KT will read
+                them again from the tracker.
+              </td>
+            </tr>
+          </tbody>
+        ) : (
+          flows.map((flow) => (
+            <StreamGroup key={flow.keitaro_stream_id} campaignId={campaignId} stream={flow} />
+          ))
+        )}
+      </Frame>
     </section>
   )
 }

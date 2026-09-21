@@ -1,14 +1,18 @@
 import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
 import { toast } from 'sonner'
 
 import type { Offer } from '@/entities/offer'
 import { campaignStreamsQuery, type StreamAnswer } from '@/entities/stream'
-import { api, unwrap } from '@/shared/api/client'
+import { ApiError, api, unwrap } from '@/shared/api/client'
+import type { components } from '@/shared/api/schema.gen'
 import { queryKeys } from '@/shared/api/query-keys'
 import { problemMessage } from '@/shared/lib/problem-message'
 
 import type { DraftOperation } from '../lib/optimistic'
 import { withOperation, withPin, withStream } from '../lib/optimistic'
+
+type ConflictingState = components['schemas']['ConflictingState']
 
 /** Scopes the in-flight check to one flow, so a busy Flow 2 does not freeze Flow 1. */
 function draftMutationKey(campaignId: string, streamId: number) {
@@ -100,11 +104,16 @@ export function useDraftOps(campaignId: string, streamId: number) {
  *
  * `CANCEL` does not touch the pins. They live in the mirror, not in the draft, which is what
  * makes them survive both of these buttons — the reference tool behaves the same way.
+ *
+ * A 409 is not an error to report and move on from: the body carries both readings of the
+ * flow, so it is held here until somebody decides between them. Nothing is retried on its
+ * own — writing over another person's work is a decision, never a retry.
  */
 export function useDraftPush(campaignId: string, streamId: number) {
   const queryClient = useQueryClient()
   const { queryKey } = campaignStreamsQuery(campaignId)
   const mutationKey = draftMutationKey(campaignId, streamId)
+  const [conflict, setConflict] = useState<ConflictingState | null>(null)
 
   const land = (stream: StreamAnswer) => {
     queryClient.setQueryData(queryKey, (view) =>
@@ -114,19 +123,25 @@ export function useDraftPush(campaignId: string, streamId: number) {
 
   const push = useMutation({
     mutationKey,
-    mutationFn: () =>
+    mutationFn: (overwrite: boolean) =>
       unwrap(
         api.POST('/api/v1/campaigns/{campaign_id}/streams/{stream_id}/draft/push', {
           params: { path: { campaign_id: campaignId, stream_id: streamId } },
-          body: { overwrite: false },
+          body: { overwrite },
         }),
       ),
     onSuccess: (stream) => {
+      setConflict(null)
       land(stream)
       void queryClient.invalidateQueries({ queryKey: queryKeys.campaigns.stats(campaignId) })
       toast.success(`Written to Keitaro: ${activeShares(stream)}`)
     },
     onError: (error) => {
+      const clash = error instanceof ApiError ? (error.problem.conflict ?? null) : null
+      if (clash !== null) {
+        setConflict(clash)
+        return
+      }
       toast.error(problemMessage(error, 'Keitaro did not take the change.'))
     },
   })
@@ -147,8 +162,17 @@ export function useDraftPush(campaignId: string, streamId: number) {
 
   return {
     working: useIsMutating({ mutationKey }) > 0,
+    /** The two readings of the flow a 409 came back with, until somebody chooses. */
+    conflict,
+    dismissConflict: () => {
+      setConflict(null)
+    },
     push: () => {
-      push.mutate()
+      push.mutate(false)
+    },
+    /** The answer to a 409 and nothing else — it writes over what the tracker holds. */
+    pushOver: () => {
+      push.mutate(true)
     },
     discard: () => {
       discard.mutate()

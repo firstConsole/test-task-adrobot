@@ -4,6 +4,7 @@ import type { Stream } from '@/entities/stream'
 import { Button } from '@/shared/ui/button'
 
 import { useDraftPush } from '../api/use-draft-ops'
+import { ConflictDialog } from './conflict-dialog'
 
 type DraftActionsProps = {
   campaignId: string
@@ -59,6 +60,14 @@ export function DraftActions({ campaignId, stream }: DraftActionsProps) {
           {warning}
         </span>
       ))}
+
+      <ConflictDialog
+        conflict={draft.conflict}
+        stream={stream}
+        working={draft.working}
+        onOverwrite={draft.pushOver}
+        onDismiss={draft.dismissConflict}
+      />
     </div>
   )
 }
