@@ -1,4 +1,4 @@
-"""The second implementation of the Keitaro ports, in memory.
+"""The second implementation of the ports, in memory.
 
 A port with one implementation is a layer of indirection; a port with two is a boundary.
 This is the second, and writing it is what proves the first one's signatures are about what
@@ -20,6 +20,10 @@ behaviour those scenarios turn on, and no more:
 
 What it does not model is transport: no retries, no statuses, no redirects. Those are the
 adapter's own, and `tests/infrastructure/` exercises them against respx.
+
+`FakeClock` is here for the same reason as the rest and not because it is about Keitaro: a
+scenario that has to say "five minutes and one second later" — the reference cache of 6.2 —
+would otherwise say it by sleeping.
 """
 
 from __future__ import annotations
@@ -31,6 +35,7 @@ from typing import TYPE_CHECKING, override
 
 from adrobot.application.errors import UpstreamNotFoundError
 from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPort
+from adrobot.application.ports.system import Clock
 from adrobot.domain.campaign import Campaign, Group, ReferenceData, TrackerDomain, TrafficSource
 from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
 from adrobot.domain.stream import Stream, StreamOffer
@@ -288,3 +293,18 @@ class FakeKeitaroReports(KeitaroReportsPort):
         self.calls.append(method)
         if self.failure is not None:
             raise self.failure
+
+
+class FakeClock(Clock):
+    """A clock that moves only when a test moves it."""
+
+    def __init__(self, at: datetime = FIRST_MOMENT) -> None:
+        self.at = at
+
+    @override
+    def now(self) -> datetime:
+        return self.at
+
+    def advance(self, by: timedelta) -> None:
+        """Move the clock forward, which is the whole reason this exists."""
+        self.at += by
