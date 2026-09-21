@@ -323,11 +323,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 # Deliberately not here yet, and which stage brings it:
 #
-#   6.x   fixtures over tests/fakes.py. The fakes themselves arrived at 4.8; a fixture
-#         for one belongs in the commit that brings the first scenario to build on it,
-#         because what a scenario wants configured is not knowable before there is one.
-#   6.6   a `client` that runs the lifespan. ASGITransport does not run one, and there is
-#         still none to run: 4.3 gave the tracker client its own context manager instead
-#         of an application lifespan. The day create_app takes a ports factory, this
-#         becomes `async with app.router.lifespan_context(app): yield http`.
-#   6.8   an `authorised_client` carrying the shared token.
+#   7.x   a fixture for a campaign with a live draft. The editor is the first thing that
+#         wants one, and what a draft should be seeded with is not knowable before there is
+#         a scenario editing it.
+#
+# What used to be on this list and has arrived: the `world` of fakes above (6.6), the
+# `client` that enters the lifespan by hand (6.6) and the shared token, which is a header a
+# test module sets on the client it was handed rather than a second client fixture — one
+# line where a fixture would have been a second thing to keep in step with `Settings`.
