@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 import { useCampaignStreams } from '@/entities/stream'
 import { ApiError } from '@/shared/api/client'
 import { ROUTES } from '@/shared/config/routes'
+import { problemMessage } from '@/shared/lib/problem-message'
 import { Table } from '@/shared/ui/table'
 import { COLUMN_COUNT, OfferTableHead, StreamGroup } from '@/widgets/stream-group'
 
@@ -24,13 +25,12 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
   }
 
   if (streams.isError) {
-    const problem = streams.error instanceof ApiError ? streams.error : null
+    const correlationId =
+      streams.error instanceof ApiError ? streams.error.correlationId : null
     return (
       <p role="alert" className="text-destructive text-sm">
-        {problem?.message ?? 'The flows could not be read.'}
-        {problem?.correlationId === null || problem?.correlationId === undefined
-          ? null
-          : ` (${problem.correlationId})`}
+        {problemMessage(streams.error, 'The flows could not be read.')}
+        {correlationId === null ? null : ` (${correlationId})`}
       </p>
     )
   }
@@ -61,7 +61,7 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
               </tr>
             </tbody>
           ) : (
-            flows.map((flow) => <StreamGroup key={flow.keitaro_stream_id} stream={flow} />)
+            flows.map((flow) => <StreamGroup key={flow.keitaro_stream_id} campaignId={campaignId} stream={flow} />)
           )}
         </Table>
       </div>

@@ -2,6 +2,7 @@ import { StreamHeader, type Stream } from '@/entities/stream'
 import { TableBody, TableCell, TableHead, TableRow } from '@/shared/ui/table'
 
 import { COLUMN_COUNT } from '../model/columns'
+import { AddOfferRow } from './add-offer-row'
 import { OfferRow } from './offer-row'
 
 /**
@@ -11,6 +12,7 @@ import { OfferRow } from './offer-row'
 const ROTATES = 'landings'
 
 type StreamGroupProps = {
+  campaignId: string
   stream: Stream
 }
 
@@ -21,7 +23,9 @@ type StreamGroupProps = {
  * screen reader announces each offer together with the flow it belongs to. Two flows in one
  * table, told apart the way the markup means them to be.
  */
-export function StreamGroup({ stream }: StreamGroupProps) {
+export function StreamGroup({ campaignId, stream }: StreamGroupProps) {
+  const streamId = stream.keitaro_stream_id
+
   return (
     <TableBody className="border-border border-t">
       <TableRow className="hover:bg-transparent">
@@ -35,9 +39,18 @@ export function StreamGroup({ stream }: StreamGroupProps) {
       </TableRow>
 
       {stream.schema === ROTATES ? (
-        stream.rows.map((row) => (
-          <OfferRow key={row.offer_id} row={row} streamName={stream.name} />
-        ))
+        <>
+          {stream.rows.map((row) => (
+            <OfferRow
+              key={row.offer_id}
+              campaignId={campaignId}
+              streamId={streamId}
+              streamName={stream.name}
+              row={row}
+            />
+          ))}
+          <AddOfferRow campaignId={campaignId} streamId={streamId} streamName={stream.name} />
+        </>
       ) : (
         <TableRow className="hover:bg-transparent">
           <TableCell colSpan={COLUMN_COUNT} className="text-muted-foreground whitespace-normal">

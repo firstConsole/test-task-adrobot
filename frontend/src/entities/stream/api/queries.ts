@@ -3,6 +3,8 @@ import { queryOptions, useQuery } from '@tanstack/react-query'
 import { api, unwrap } from '@/shared/api/client'
 import { queryKeys } from '@/shared/api/query-keys'
 
+import type { CampaignStreams } from '../model/types'
+
 /**
  * One campaign's flows, which is the whole editor screen.
  *
@@ -13,7 +15,7 @@ import { queryKeys } from '@/shared/api/query-keys'
 export function campaignStreamsQuery(campaignId: string) {
   return queryOptions({
     queryKey: queryKeys.campaigns.streams(campaignId),
-    queryFn: ({ signal }) =>
+    queryFn: ({ signal }): Promise<CampaignStreams> =>
       unwrap(
         api.GET('/api/v1/campaigns/{campaign_id}/streams', {
           params: { path: { campaign_id: campaignId } },
