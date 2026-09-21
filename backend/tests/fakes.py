@@ -102,6 +102,11 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         """Make one method raise until a test says otherwise."""
         self.failures[method] = error
 
+    def given_campaign(self, campaign: Campaign) -> Campaign:
+        """Put a campaign into the tracker as if somebody had built it by hand."""
+        self.campaigns[campaign.id] = campaign
+        return campaign
+
     def given_stream(self, stream: Stream) -> Stream:
         """Put a flow into the tracker as if somebody had built it by hand.
 

@@ -69,6 +69,7 @@ from adrobot.domain.ids import (
 from adrobot.domain.shares import OfferRow
 from adrobot.domain.stream import StreamOffer
 from adrobot.domain.values import OfferState
+from tests.fakes import FakeKeitaroAdmin
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Collection, Mapping
@@ -438,3 +439,22 @@ class FakeUnitOfWork(UnitOfWork):
             raise
         finally:
             self.open = False
+
+
+class WatchesTheDatabase(FakeKeitaroAdmin):
+    """A tracker that fails the test if a transaction is open when it is called.
+
+    Here rather than beside the other tracker fakes because the rule is about this file: a
+    connection held for the length of a network call empties the pool the moment the tracker
+    is slow, and nothing about the code that does it looks wrong. Every port method goes
+    through `_called`, so one override covers the ones written later too.
+    """
+
+    def __init__(self, uow: FakeUnitOfWork) -> None:
+        super().__init__()
+        self._uow = uow
+
+    @override
+    def _called(self, method: str) -> None:
+        assert not self._uow.open, f"{method} was called with a database transaction open"
+        super()._called(method)

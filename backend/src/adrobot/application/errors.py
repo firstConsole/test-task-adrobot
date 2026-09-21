@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from adrobot.domain.draft import DraftStatus
+    from adrobot.domain.ids import CampaignId
 
 
 class ApplicationError(Exception):
@@ -121,10 +122,19 @@ class CampaignAlreadyImportedError(ApplicationError):
     """That tracker campaign is already open here.
 
     A second local copy would give one flow two editors.
+
+    `campaign_id` is the copy that already exists, and it is optional because the two places
+    this is raised from know different things: the import scenario looked the row up and can
+    name it, while the repository's own `ON CONFLICT DO NOTHING` learns only that somebody
+    won the race. Where it is known it reaches the problem body, so the screen can offer the
+    campaign instead of only refusing the request.
     """
 
-    def __init__(self, keitaro_campaign_id: object) -> None:
+    def __init__(
+        self, keitaro_campaign_id: object, *, campaign_id: CampaignId | None = None
+    ) -> None:
         super().__init__(f"campaign {keitaro_campaign_id} in the tracker is already imported")
+        self.campaign_id = campaign_id
 
 
 class StreamNotFoundError(ApplicationError):

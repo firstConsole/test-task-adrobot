@@ -33,7 +33,7 @@ from adrobot.domain.campaign import (
 from adrobot.domain.ids import KeitaroCampaignId, OfferId
 from adrobot.domain.stream import Stream, StreamSchema, StreamSpec
 from adrobot.domain.values import CampaignName, CountryCode
-from tests.fake_persistence import FakeUnitOfWork
+from tests.fake_persistence import FakeUnitOfWork, WatchesTheDatabase
 from tests.fakes import DEFAULT_REFERENCE, FakeAliasFactory, FakeClock, FakeKeitaroAdmin
 
 OFFER = OfferId(3749)
@@ -169,24 +169,6 @@ async def test_the_database_is_never_held_open_while_the_tracker_is_called() -> 
     # row — and none of them open while any of the six tracker calls was in flight.
     assert guarded.uow.blocks == 3
     assert not guarded.uow.open
-
-
-class WatchesTheDatabase(FakeKeitaroAdmin):
-    """A tracker that fails the test if a transaction is open when it is called.
-
-    The rule it enforces is the one a use case breaks by accident: a connection held for the
-    length of a network call empties the pool the moment the tracker is slow, and nothing
-    about the code that does it looks wrong.
-    """
-
-    def __init__(self, uow: FakeUnitOfWork) -> None:
-        super().__init__()
-        self._uow = uow
-
-    @override
-    def _called(self, method: str) -> None:
-        assert not self._uow.open, f"{method} was called with a database transaction open"
-        super()._called(method)
 
 
 class DropsWhatItWasNotAsked(FakeKeitaroAdmin):
