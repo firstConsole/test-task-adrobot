@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 BASE = VALID_ENVIRONMENT["ADROBOT_KEITARO_BASE_URL"]
 CAMPAIGN_ID = KeitaroCampaignId(93212)
 DAY = date(2026, 9, 20)
+ZONE = "Europe/Madrid"
 
 
 def _sent(route: Route, index: int = 0) -> dict[str, Any]:
@@ -40,9 +41,7 @@ def _sent(route: Route, index: int = 0) -> dict[str, Any]:
 
 @pytest.fixture
 def reports(settings: Settings) -> HttpKeitaroReports:
-    return HttpKeitaroReports(
-        KeitaroTransport(build_keitaro_client(settings), backoff=0.0), timezone="Europe/Madrid"
-    )
+    return HttpKeitaroReports(KeitaroTransport(build_keitaro_client(settings), backoff=0.0))
 
 
 async def test_a_report_is_asked_for_in_the_schema_s_own_dialect(
@@ -53,7 +52,7 @@ async def test_a_report_is_asked_for_in_the_schema_s_own_dialect(
             return_value=httpx.Response(200, json={"rows": [], "total": 0})
         )
 
-        await reports.clicks_by_stream(CAMPAIGN_ID, DAY)
+        await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE)
 
     body = _sent(route)
     assert body["dimensions"] == ["stream_id"]
@@ -79,7 +78,7 @@ async def test_a_build_that_speaks_the_other_dialect_is_asked_again_in_it(
             ]
         )
 
-        clicks = await reports.clicks_by_stream(CAMPAIGN_ID, DAY)
+        clicks = await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE)
 
     assert _sent(route, 1)["grouping"] == ["stream_id"], "two shipping clients spell it this way"
     assert _sent(route, 1)["metrics"] == ["clicks"]
@@ -98,8 +97,8 @@ async def test_the_dialect_that_worked_is_the_one_used_next_time(
             ]
         )
 
-        await reports.clicks_by_stream(CAMPAIGN_ID, DAY)
-        await reports.clicks_by_offer(CAMPAIGN_ID, DAY)
+        await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE)
+        await reports.clicks_by_offer(CAMPAIGN_ID, DAY, timezone=ZONE)
 
     assert route.call_count == 3, "the second report does not repeat the first one's mistake"
     assert "grouping" in _sent(route, 2)
@@ -110,7 +109,7 @@ async def test_a_body_rejected_in_both_dialects_is_reported(reports: HttpKeitaro
         route = mock.post("/report/build").mock(return_value=httpx.Response(400, json={"e": "no"}))
 
         with pytest.raises(UpstreamRejectedError):
-            await reports.clicks_by_stream(CAMPAIGN_ID, DAY)
+            await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE)
 
     assert route.call_count == 2, "asked twice at most, and never a third time"
 
@@ -127,9 +126,9 @@ async def test_once_the_dialect_is_settled_a_refusal_is_just_a_refusal(
             ]
         )
 
-        await reports.clicks_by_stream(CAMPAIGN_ID, DAY)
+        await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE)
         with pytest.raises(UpstreamRejectedError, match="unknown measure"):
-            await reports.clicks_by_offer(CAMPAIGN_ID, DAY)
+            await reports.clicks_by_offer(CAMPAIGN_ID, DAY, timezone=ZONE)
 
     assert route.call_count == 3, (
         "the dialect is no longer in question, so the second report is not asked twice"
@@ -145,7 +144,7 @@ async def test_an_unreachable_report_is_not_dressed_up_as_zero_clicks(
         mock.post("/report/build").mock(return_value=httpx.Response(503))
 
         with pytest.raises(UpstreamUnavailableError):
-            await reports.clicks_by_stream(CAMPAIGN_ID, DAY)
+            await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE)
 
 
 async def test_an_answer_that_is_a_bare_array_is_read_too(reports: HttpKeitaroReports) -> None:
@@ -154,7 +153,7 @@ async def test_an_answer_that_is_a_bare_array_is_read_too(reports: HttpKeitaroRe
             return_value=httpx.Response(200, json=[{"stream_id": 564221, "clicks": 3}])
         )
 
-        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY) == {564221: 3}
+        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE) == {564221: 3}
 
 
 async def test_clicks_and_conversions_come_back_per_offer(reports: HttpKeitaroReports) -> None:
@@ -171,7 +170,7 @@ async def test_clicks_and_conversions_come_back_per_offer(reports: HttpKeitaroRe
             )
         )
 
-        stats = await reports.clicks_by_offer(CAMPAIGN_ID, DAY)
+        stats = await reports.clicks_by_offer(CAMPAIGN_ID, DAY, timezone=ZONE)
 
     assert _sent(route)["measures"] == ["clicks", "conversions"], (
         "two measures, because every extra name is one a particular build might reject"
@@ -192,7 +191,7 @@ async def test_numbers_that_arrived_as_strings_are_still_numbers(
             )
         )
 
-        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY) == {564221: 7}
+        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE) == {564221: 7}
 
 
 @pytest.mark.parametrize(
@@ -210,7 +209,7 @@ async def test_a_row_with_nothing_to_key_it_by_is_skipped(
     async with respx.mock(base_url=BASE) as mock:
         mock.post("/report/build").mock(return_value=httpx.Response(200, json={"rows": [row]}))
 
-        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY) == {}
+        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE) == {}
 
 
 @pytest.mark.parametrize("measure", [None, "lots", True, {"value": 7}])
@@ -222,4 +221,4 @@ async def test_a_measure_that_is_not_a_number_reads_as_none_of_them(
             return_value=httpx.Response(200, json={"rows": [{"stream_id": 1, "clicks": measure}]})
         )
 
-        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY) == {1: 0}
+        assert await reports.clicks_by_stream(CAMPAIGN_ID, DAY, timezone=ZONE) == {1: 0}

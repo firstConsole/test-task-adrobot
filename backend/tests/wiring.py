@@ -16,6 +16,8 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from adrobot.application.reference import ReferenceResolver
+from adrobot.application.statistics import StatsReader
+from adrobot.application.time_zone import TrackerTimeZone
 from adrobot.composition import AppPorts
 from tests.fake_persistence import FakeUnitOfWork
 from tests.fakes import (
@@ -48,12 +50,20 @@ class FakeWorld:
 
 
 def fake_world(
-    *, admin: FakeKeitaroAdmin | None = None, reports: FakeKeitaroReports | None = None
+    *,
+    admin: FakeKeitaroAdmin | None = None,
+    reports: FakeKeitaroReports | None = None,
+    timezone: str = "UTC",
 ) -> FakeWorld:
-    """Compose one application's ports out of fakes, as `build_ports` composes the real ones."""
+    """Compose one application's ports out of fakes, as `build_ports` composes the real ones.
+
+    `timezone` is the *configured* zone — what stands when the tracker names none, which is
+    what `FakeKeitaroAdmin` does unless a test says otherwise.
+    """
     tracker = admin if admin is not None else FakeKeitaroAdmin()
     statistics = reports if reports is not None else FakeKeitaroReports()
     clock = FakeClock()
+    zone = TrackerTimeZone(tracker, configured=timezone)
     uow = FakeUnitOfWork(clock)
     aliases = FakeAliasFactory()
     correlation = FakeCorrelationIds()
@@ -62,6 +72,8 @@ def fake_world(
             admin=tracker,
             reports=statistics,
             references=ReferenceResolver(tracker, clock),
+            statistics=StatsReader(statistics, clock, zone=zone),
+            zone=zone,
             aliases=aliases,
             clock=clock,
             correlation=correlation,

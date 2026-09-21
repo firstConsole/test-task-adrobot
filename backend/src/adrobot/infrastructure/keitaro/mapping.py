@@ -51,6 +51,7 @@ from adrobot.infrastructure.keitaro.schemas import (
     KtReport,
     KtReportFilter,
     KtReportRequest,
+    KtSettings,
     KtSource,
     KtStream,
     KtStreamWrite,
@@ -208,6 +209,17 @@ def report_body(
             KtReportFilter(name="campaign_id", operator="EQUALS", expression=int(campaign_id)),
         ),
     ).body()
+
+
+def to_time_zone(raw: object) -> str | None:
+    """Read the tracker's own time zone off `GET /settings`, or `None` where it names none.
+
+    `None` and not a raise: this reads a path the published schema does not have, and a
+    build that answers without a zone is answering, not failing. What the caller does with
+    the absence is the caller's decision — `application/time_zone.py` falls back to the
+    configured name, which is the value this would only ever have confirmed.
+    """
+    return _validated(KtSettings, raw).timezone
 
 
 def to_report_rows(raw: object) -> tuple[Mapping[str, Any], ...]:

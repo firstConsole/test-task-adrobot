@@ -9,6 +9,10 @@ statistics screen that comes back empty with no explanation:
     asking again in the clients' — after which the process remembers which one worked;
 *   the answer is read as `{rows: [...]}` or as a bare array, whichever arrives.
 
+The zone the range is asked for in arrives with the day and is not held here. One object
+holding a zone is one more opinion about which day today is, and the caller that worked the
+date out is the only one entitled to it.
+
 A row that cannot be read is skipped rather than raised over. This is a column of numbers
 beside a working editor, and stage 8.2 darkens it when the tracker will not answer at all;
 losing the whole screen because one row of a report is odd would be the wrong trade.
@@ -47,20 +51,18 @@ _CLIENT_NAMES: Final = {"dimensions": "grouping", "measures": "metrics"}
 class HttpKeitaroReports(KeitaroReportsPort):
     """`POST /report/build`, twice: once grouped by flow and once by offer."""
 
-    def __init__(self, transport: KeitaroTransport, *, timezone: str) -> None:
+    def __init__(self, transport: KeitaroTransport) -> None:
         self._transport = transport
-        # The IANA name rather than a `tzinfo`, because that is what goes in the body. A
-        # report asked for in the wrong zone answers with somebody else's midnight, which
-        # is the difference between "clicks today" and a number nobody can account for.
-        self._timezone = timezone
         self._as_clients = False
 
     @override
     async def clicks_by_stream(
-        self, campaign_id: KeitaroCampaignId, day: date
+        self, campaign_id: KeitaroCampaignId, day: date, *, timezone: str
     ) -> Mapping[KeitaroStreamId, int]:
-        """Return the clicks each flow of one campaign took on one day, in the tracker's zone."""
-        rows = await self._build(campaign_id, day, dimension=STREAM_DIMENSION, measures=(CLICKS,))
+        """Return the clicks each flow of one campaign took on one day, in one zone."""
+        rows = await self._build(
+            campaign_id, day, timezone=timezone, dimension=STREAM_DIMENSION, measures=(CLICKS,)
+        )
         return {
             KeitaroStreamId(key): _whole(row.get(CLICKS))
             for row in rows
@@ -69,11 +71,15 @@ class HttpKeitaroReports(KeitaroReportsPort):
 
     @override
     async def clicks_by_offer(
-        self, campaign_id: KeitaroCampaignId, day: date
+        self, campaign_id: KeitaroCampaignId, day: date, *, timezone: str
     ) -> Mapping[OfferId, OfferStats]:
-        """Return the same day grouped by offer — the editor's Stats column, in one call."""
+        """Return the same day in the same zone, grouped by offer — the Stats column."""
         rows = await self._build(
-            campaign_id, day, dimension=OFFER_DIMENSION, measures=(CLICKS, CONVERSIONS)
+            campaign_id,
+            day,
+            timezone=timezone,
+            dimension=OFFER_DIMENSION,
+            measures=(CLICKS, CONVERSIONS),
         )
         return {
             OfferId(key): OfferStats(
@@ -88,6 +94,7 @@ class HttpKeitaroReports(KeitaroReportsPort):
         campaign_id: KeitaroCampaignId,
         day: date,
         *,
+        timezone: str,
         dimension: str,
         measures: tuple[str, ...],
     ) -> tuple[Mapping[str, Any], ...]:
@@ -97,7 +104,7 @@ class HttpKeitaroReports(KeitaroReportsPort):
             measures=measures,
             campaign_id=campaign_id,
             day=day,
-            timezone=self._timezone,
+            timezone=timezone,
         )
         try:
             answered = await self._transport.query(

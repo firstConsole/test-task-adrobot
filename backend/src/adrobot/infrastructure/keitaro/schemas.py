@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any, Final
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 # Keitaro's own default for a flow that exists: the write schema declares `state` with
 # `default: active`, so a row or a flow that arrives without one is one taking traffic.
@@ -213,6 +213,22 @@ class KtReport(KtReadModel):
     """
 
     rows: tuple[dict[str, Any], ...] = ()
+
+
+class KtSettings(KtReadModel):
+    """`GET /settings`, kept to the one field this service reads off it.
+
+    **The path is in no part of the published schema**, so everything about this model is a
+    guess made safe rather than a contract: `extra="ignore"` drops the rest of an object
+    that is known to hold a licence key, and the one field is optional because a build that
+    answers without it is as likely as one that answers 404. Which key names the zone is
+    the second guess — two spellings are in circulation and the tracker uses one of them —
+    and `AliasChoices` is cheaper than being wrong.
+    """
+
+    timezone: str | None = Field(
+        default=None, validation_alias=AliasChoices("timezone", "time_zone")
+    )
 
 
 class KtGroupCreate(KtWriteModel):
