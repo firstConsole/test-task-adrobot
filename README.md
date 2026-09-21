@@ -529,7 +529,6 @@ RLS решает задачу «несколько арендаторов в о�
 
 | Файл | О чём |
 |---|---|
-| [`docs/РАЗБОР.md`](docs/РАЗБОР.md) | разбор решений: почему так, где я ошибался по ходу и что осталось за кадром |
 | [`docs/keitaro-api-notes.md`](docs/keitaro-api-notes.md) | разведка Admin API: утверждение → чем подтверждено → каким запросом |
 | [`docs/keitaro-openapi.json`](docs/keitaro-openapi.json) | спека Keitaro, с которой сверялся код |
 | [`docs/adrobot-openapi.json`](docs/adrobot-openapi.json) | наша спека; из неё фронт генерирует типы |

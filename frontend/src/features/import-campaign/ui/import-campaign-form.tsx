@@ -8,7 +8,7 @@ import { ApiError } from '@/shared/api/client'
 import { campaignStreamsPath } from '@/shared/config/routes'
 import { readRefusals } from '@/shared/lib/refusals'
 import { Button } from '@/shared/ui/button'
-import { Field, FieldDescription, FieldError, FieldLabel } from '@/shared/ui/field'
+import { Field, FieldError, FieldLabel } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
 
 import { useImportCampaign } from '../api/use-import-campaign'
