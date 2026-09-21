@@ -89,6 +89,15 @@ media buyer whose campaign did not get created, and the one useful thing they ca
 carry the id to somebody with a log."""
 
 
+class NotAuthenticatedError(Exception):
+    """No usable credential arrived with a request that needs one.
+
+    Declared here rather than beside the dependency that raises it, so that everything this
+    API can answer with is in one table. It is not an `ApplicationError`: no use case ran,
+    and nothing about this failure would mean anything to the CLI.
+    """
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Problem:
     """What one kind of failure is worth in HTTP, and what a client calls it."""
@@ -96,6 +105,9 @@ class Problem:
     status: int
     code: str
     title: str
+    headers: Mapping[str, str] | None = None
+    """What the status line needs to be honest. A 401 without `WWW-Authenticate` is a 401
+    that does not say how to authenticate, which RFC 9110 requires of one."""
 
     @property
     def type(self) -> str:
@@ -104,6 +116,15 @@ class Problem:
 
 
 PROBLEMS: Final[Mapping[type[Exception], Problem]] = {
+    # --- the caller did not say who they are --------------------------------------------
+    NotAuthenticatedError: Problem(
+        status=401,
+        code="not-authenticated",
+        title="This endpoint needs the shared token",
+        # `Bearer` and never `Basic`: a browser answers `Basic` with its own credential
+        # dialog, which this service has no way to satisfy.
+        headers={"WWW-Authenticate": "Bearer"},
+    ),
     # --- the caller asked for something that is not there -------------------------------
     CampaignNotFoundError: Problem(status=404, code="campaign-not-found", title="No such campaign"),
     StreamNotFoundError: Problem(status=404, code="flow-not-found", title="No such flow"),
@@ -212,6 +233,7 @@ def install_error_handlers(app: FastAPI, *, expose_internals: bool) -> None:
     async def http_error(_: Request, exc: Exception) -> Response:
         return _http_error(exc)
 
+    app.add_exception_handler(NotAuthenticatedError, handled)
     app.add_exception_handler(DomainError, handled)
     app.add_exception_handler(ApplicationError, handled)
     app.add_exception_handler(RequestValidationError, invalid)
@@ -248,6 +270,7 @@ def _rendered(exc: Exception, *, problem: Problem, expose_internals: bool) -> JS
         detail=detail,
         campaign_id=getattr(exc, "campaign_id", None),
         errors=_tracker_fields(exc),
+        headers=problem.headers,
     )
 
 

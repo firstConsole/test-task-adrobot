@@ -86,6 +86,10 @@ def create_app(*, settings: Settings, ports_factory: PortsFactory) -> FastAPI:
         ],
         lifespan=_composed(ports_factory, settings),
     )
+    # Put on the application at construction and not in the lifespan below: settings are
+    # decided before anything runs and hold no resource, so a dependency that needs one —
+    # the token check of 6.8 — must not be hostage to a lifespan having started.
+    app.state.settings = settings
     # Every failure of this API is rendered here and in no router: the detail of a 5xx is
     # withheld outside dev, on the same reading of `env` as the docs above.
     install_error_handlers(app, expose_internals=docs_enabled)
@@ -106,7 +110,6 @@ def _composed(ports_factory: PortsFactory, settings: Settings) -> Lifespan[FastA
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         async with ports_factory(settings) as ports:
-            app.state.settings = settings
             app.state.ports = ports
             yield
 
