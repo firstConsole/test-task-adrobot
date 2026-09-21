@@ -2,8 +2,10 @@ import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 
+import { canFinishSetup } from '@/entities/campaign'
 import { useCampaignNumbers } from '@/entities/stats'
 import { useCampaignStreams } from '@/entities/stream'
+import { FinishSetupButton } from '@/features/repair-campaign'
 import { FetchStreamsButton } from '@/features/sync-streams'
 import { ApiError } from '@/shared/api/client'
 import { ROUTES } from '@/shared/config/routes'
@@ -90,18 +92,24 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
       </nav>
 
       {campaign.setup_status === 'ready' ? null : (
-        <p
+        <div
           role="alert"
           className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
         >
           <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
-          <span>
-            This campaign's flows were never finished in the tracker.
-            {campaign.setup_failure === null || campaign.setup_failure === undefined
-              ? ''
-              : ` ${campaign.setup_failure}`}
-          </span>
-        </p>
+          <div className="space-y-2">
+            <p>
+              This campaign's flows were never finished in the tracker.
+              {campaign.setup_failure === null || campaign.setup_failure === undefined
+                ? ''
+                : ` ${campaign.setup_failure}`}{' '}
+              {canFinishSetup(campaign)
+                ? 'Finishing it creates whatever Keitaro is missing and leaves everything else alone.'
+                : 'It was built somewhere else, so there is no record here of what its flows were meant to be — they can be edited, but not rebuilt.'}
+            </p>
+            {canFinishSetup(campaign) ? <FinishSetupButton campaignId={campaignId} /> : null}
+          </div>
+        </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2">

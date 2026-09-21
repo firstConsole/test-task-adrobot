@@ -1,8 +1,8 @@
 # Six jobs, one per kind of failure, so a red run says which kind without being opened.
 #
-# PLAN-BACKEND §11 describes six of them; `openapi` is one it does not, because the types
-# the frontend is built from are generated from a document this repository commits, and
-# only the routers can say whether that document is still true.
+# PLAN-BACKEND §11 describes six of them; `generated` is one it does not, because two of the
+# files the frontend is built from — its API types and its country list — are committed here
+# and generated from the backend, and only the backend can say whether they are still true.
 #
 # Still missing, because it cannot pass yet and a job that is allowed to fail is a job
 # nobody reads:
@@ -119,8 +119,8 @@ jobs:
           TEST_DATABASE_URL: postgresql+asyncpg://adrobot:adrobot@127.0.0.1:5432/adrobot
         run: poetry run pytest
 
-  openapi:
-    name: openapi
+  generated:
+    name: generated
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -133,6 +133,12 @@ jobs:
         run: make openapi
       - name: the committed document still matches the routers
         run: git diff --exit-code -- docs/adrobot-openapi.json
+      # The geo select is built from a copy of the domain's ISO 3166-1 list. A copy that
+      # drifts is a form offering a country the API then refuses.
+      - name: make countries
+        run: make countries
+      - name: the committed country list still matches the domain
+        run: git diff --exit-code -- frontend/src/shared/lib/countries.gen.ts
 
   frontend:
     name: frontend

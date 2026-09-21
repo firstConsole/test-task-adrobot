@@ -158,3 +158,49 @@ describe('a push onto a flow that moved', () => {
     expect(within(dialog).getByRole('button', { name: /leave it/i })).toBeInTheDocument()
   })
 })
+
+describe('a campaign whose flows the tracker never took', () => {
+  const UNFINISHED = {
+    ...CAMPAIGN_BODY,
+    setup_status: 'needs_attention',
+    setup_failure: 'Keitaro refused Flow 2.',
+    requested_country: 'MX',
+    requested_offer_id: 11112,
+  }
+
+  function serveCampaign(campaign: Record<string, unknown>) {
+    return serveApi((call) => {
+      if (call.path.endsWith('/repair')) {
+        return { body: { ...campaign, setup_status: 'ready', setup_failure: null } }
+      }
+      if (call.path.endsWith('/stats')) return { body: STATS }
+      return { body: { campaign, streams: [] } }
+    })
+  }
+
+  it('offers to finish the ones we built, and says when it did', async () => {
+    const user = userEvent.setup()
+    const calls = serveCampaign(UNFINISHED)
+
+    renderEditor()
+    expect(await screen.findByText(/Keitaro refused Flow 2\./)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'FINISH SETUP' }))
+
+    await waitFor(() => {
+      expect(calls.some((call) => call.path.endsWith('/repair'))).toBe(true)
+    })
+    expect(await screen.findByText('Flow 1 and Flow 2 are both in Keitaro now.')).toBeInTheDocument()
+  })
+
+  it('does not offer the button on a campaign it would be refused for', async () => {
+    // Imported: nothing here remembers what its flows were meant to be, so there is nothing
+    // to rebuild them from — and the API answers that with a 409.
+    serveCampaign({ ...UNFINISHED, requested_country: null, requested_offer_id: null })
+
+    renderEditor()
+
+    expect(await screen.findByText(/It was built somewhere else/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'FINISH SETUP' })).toBeNull()
+  })
+})
