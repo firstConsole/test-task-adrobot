@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from starlette.middleware import Middleware
 from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
+from adrobot.api.errors import install_error_handlers
 from adrobot.api.middleware import AccessLogMiddleware, CorrelationIdMiddleware
 from adrobot.api.routers import health
 
@@ -53,7 +54,8 @@ def create_app(*, settings: Settings, ports_factory: PortsFactory) -> FastAPI:
     # `/docs` is an unauthenticated console pointed at an API whose tracker key can spend
     # money, and the frontend generates its types from a dev or CI run (9.6), never from
     # the deployed service. Derived from `env` rather than from a knob of its own, for the
-    # same reason as the constant above.
+    # same reason as the constant above — and the same reading decides whether a 5xx says
+    # what went wrong or only gives out its correlation id.
     docs_enabled = settings.env != "prod"
 
     app = FastAPI(
@@ -84,6 +86,9 @@ def create_app(*, settings: Settings, ports_factory: PortsFactory) -> FastAPI:
         ],
         lifespan=_composed(ports_factory, settings),
     )
+    # Every failure of this API is rendered here and in no router: the detail of a 5xx is
+    # withheld outside dev, on the same reading of `env` as the docs above.
+    install_error_handlers(app, expose_internals=docs_enabled)
     app.include_router(health.router)
     return app
 
