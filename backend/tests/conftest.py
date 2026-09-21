@@ -31,6 +31,7 @@ from tests.helpers import (
     VALID_ENVIRONMENT,
     Statements,
 )
+from tests.wiring import FakeWorld, fake_ports_factory, fake_world
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
@@ -129,9 +130,20 @@ def log_stream() -> StringIO:
 
 
 @pytest.fixture
-def app(settings: Settings) -> FastAPI:
-    """The application under test, built from the fixture settings."""
-    return create_app(settings=settings)
+def world() -> FakeWorld:
+    """The fakes one application is served from, reachable by the test that drives it.
+
+    One per test and shared by every request that test makes, which is what a pool and a
+    tracker client are in production: a campaign created by one request is there for the
+    next one to read.
+    """
+    return fake_world()
+
+
+@pytest.fixture
+def app(settings: Settings, world: FakeWorld) -> FastAPI:
+    """The application under test, built from the fixture settings over the fixture fakes."""
+    return create_app(settings=settings, ports_factory=fake_ports_factory(world.ports))
 
 
 @pytest.fixture
@@ -142,9 +154,16 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     `filterwarnings = ["error"]`, and importing TestClient trips a starlette deprecation
     under httpx 0.x — a *collection* error, which aborts the whole run rather than one
     test.
+
+    The lifespan is entered by hand because `ASGITransport` is not a server and never sends
+    the `lifespan` messages one does — so without this the ports would never be composed and
+    every dependency that reads them would answer 500.
     """
     transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://adrobot.test") as http:
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=transport, base_url="http://adrobot.test") as http,
+    ):
         yield http
 
 

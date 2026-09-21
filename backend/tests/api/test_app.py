@@ -7,6 +7,7 @@ import httpx
 from adrobot.api.app import create_app
 from adrobot.settings import Settings
 from tests.helpers import VALID_ENVIRONMENT
+from tests.wiring import fake_ports_factory
 
 if TYPE_CHECKING:
     import pytest
@@ -48,7 +49,9 @@ async def test_docs_are_off_in_production_while_the_probe_still_answers(
     # Two applications in one process, which is the whole reason create_app takes settings
     # rather than reading them.
     monkeypatch.setenv("ADROBOT_ENV", "prod")
-    transport = httpx.ASGITransport(app=create_app(settings=Settings()))
+    transport = httpx.ASGITransport(
+        app=create_app(settings=Settings(), ports_factory=fake_ports_factory())
+    )
 
     async with httpx.AsyncClient(transport=transport, base_url="http://adrobot.test") as http:
         assert (await http.get("/docs")).status_code == 404
@@ -64,4 +67,4 @@ def test_create_app_reads_no_environment(
     for name in VALID_ENVIRONMENT:
         monkeypatch.delenv(name, raising=False)
 
-    assert create_app(settings=settings).title == "AD Robot API"
+    assert create_app(settings=settings, ports_factory=fake_ports_factory()).title == "AD Robot API"
