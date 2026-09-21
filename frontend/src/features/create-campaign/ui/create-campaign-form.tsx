@@ -1,9 +1,11 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
+import { useNavigate } from 'react-router'
 
 import type { Offer } from '@/entities/offer'
 import { OfferCombobox } from '@/entities/offer'
+import { campaignStreamsPath } from '@/shared/config/routes'
 import { Button } from '@/shared/ui/button'
 import {
   Field,
@@ -19,6 +21,7 @@ import { useCreateCampaign } from '../api/use-create-campaign'
 import { readRefusals } from '../model/refusals'
 import type { CreateCampaignValues } from '../model/schema'
 import { EMPTY_CAMPAIGN, createCampaignSchema } from '../model/schema'
+import { campaignCreatedToast } from './created-toast'
 import { GeoSelect } from './geo-select'
 
 /**
@@ -40,6 +43,7 @@ export function CreateCampaignForm() {
   const [offer, setOffer] = useState<Offer | null>(null)
 
   const create = useCreateCampaign()
+  const navigate = useNavigate()
 
   const submit = (values: CreateCampaignValues) => {
     // The whole form is disabled while a creation is in flight, so this can only be reached
@@ -49,6 +53,14 @@ export function CreateCampaignForm() {
     form.clearErrors('root')
 
     create.mutate(values, {
+      onSuccess: (campaign) => {
+        campaignCreatedToast(campaign, values.country)
+        // Straight into the editor, which is where part 1 hands over to part 2: the campaign
+        // now has one offer on 100% and the next thing anyone does to it is add a second.
+        // A campaign whose flows the tracker refused goes there too — that screen is the one
+        // that says so, and the one with the button to read the tracker again.
+        void navigate(campaignStreamsPath(campaign.id))
+      },
       onError: (error) => {
         const refusals = readRefusals(error)
 

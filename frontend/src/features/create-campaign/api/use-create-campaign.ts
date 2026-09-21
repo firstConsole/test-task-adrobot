@@ -1,5 +1,4 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
 
 import { api, unwrap } from '@/shared/api/client'
 import { queryKeys } from '@/shared/api/query-keys'
@@ -13,6 +12,10 @@ import type { CreateCampaignValues } from '../model/schema'
  * No optimistic anything. The editor can afford to guess because it is rearranging rows it
  * already has; this writes a campaign into somebody's live tracker and gets back an id, a
  * public link and how far the setup actually got — none of which a client could invent.
+ *
+ * What happens *next* is not here. This hook owns the request and the cache; where the
+ * person is sent and what they are told belongs to the screen, and a mutation that also
+ * navigated could not be called from anywhere else.
  */
 export function useCreateCampaign() {
   const queryClient = useQueryClient()
@@ -20,9 +23,8 @@ export function useCreateCampaign() {
   return useMutation({
     mutationFn: (values: CreateCampaignValues) =>
       unwrap(api.POST('/api/v1/campaigns', { body: values })),
-    onSuccess: async (campaign) => {
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.campaigns.all })
-      toast.success(`${campaign.name} is in Keitaro.`)
     },
     // No `onError` here, and that is the point: a refused creation belongs under the field
     // it was refused over, and only the form knows which input that is. A toast on top of
