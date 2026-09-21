@@ -24,7 +24,9 @@ const DEBOUNCE_MS = 250
 type OfferComboboxProps = {
   value: Offer | null
   onChange: (offer: Offer) => void
+  onBlur?: () => void
   disabled?: boolean
+  invalid?: boolean
   placeholder?: string
   id?: string
   className?: string
@@ -43,7 +45,9 @@ type OfferComboboxProps = {
 export function OfferCombobox({
   value,
   onChange,
+  onBlur,
   disabled = false,
+  invalid = false,
   placeholder = 'Select an offer…',
   id,
   className,
@@ -64,7 +68,12 @@ export function OfferCombobox({
       open={open}
       onOpenChange={(next) => {
         setOpen(next)
-        if (!next) setTerm('')
+        if (!next) {
+          setTerm('')
+          // Closing is when this field stops being touched, which is what a form validating
+          // on blur waits for — the trigger's own blur fires on the way in, not on the way out.
+          onBlur?.()
+        }
       }}
     >
       <PopoverTrigger asChild>
@@ -74,6 +83,7 @@ export function OfferCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-invalid={invalid || undefined}
           disabled={disabled}
           className={cn('w-full justify-between overflow-hidden font-normal', className)}
         >
