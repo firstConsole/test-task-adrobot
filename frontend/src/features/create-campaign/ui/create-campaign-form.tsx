@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router'
 import type { Offer } from '@/entities/offer'
 import { OfferCombobox } from '@/entities/offer'
 import { campaignStreamsPath } from '@/shared/config/routes'
+import { readRefusals } from '@/shared/lib/refusals'
 import { Button } from '@/shared/ui/button'
 import {
   Field,
@@ -20,9 +21,8 @@ import { Input } from '@/shared/ui/input'
 
 import { useCreateCampaign } from '../api/use-create-campaign'
 import { geoWarning } from '../model/geo-warning'
-import { readRefusals } from '../model/refusals'
 import type { CreateCampaignValues } from '../model/schema'
-import { EMPTY_CAMPAIGN, createCampaignSchema } from '../model/schema'
+import { EMPTY_CAMPAIGN, FORM_FIELDS, createCampaignSchema } from '../model/schema'
 import { campaignCreatedToast } from './created-toast'
 import { GeoSelect } from './geo-select'
 
@@ -69,7 +69,7 @@ export function CreateCampaignForm() {
         void navigate(campaignStreamsPath(campaign.id))
       },
       onError: (error) => {
-        const refusals = readRefusals(error)
+        const refusals = readRefusals(error, FORM_FIELDS)
 
         refusals.fields.forEach(({ field, message }, index) => {
           // The first one takes the focus, which is also where a screen reader is put.

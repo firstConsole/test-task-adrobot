@@ -36,3 +36,10 @@ export const createCampaignSchema = z.object({
 export type CreateCampaignValues = z.infer<typeof createCampaignSchema>
 
 export const EMPTY_CAMPAIGN: CreateCampaignValues = { name: '', country: '', offer_id: 0 }
+
+/** The names a server refusal can land on, which are the body's names and the form's. */
+export const FORM_FIELDS: ReadonlySet<keyof CreateCampaignValues> = new Set([
+  'name',
+  'country',
+  'offer_id',
+])
