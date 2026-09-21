@@ -20,7 +20,8 @@ identify an occurrence — this does.
 
 from __future__ import annotations
 
-from typing import Final
+from http import HTTPStatus
+from typing import Any, Final
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -65,3 +66,21 @@ class ProblemDetails(BaseModel):
     correlation_id: str | None = None
     campaign_id: UUID | None = None
     errors: tuple[InvalidField, ...] | None = None
+
+
+def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:
+    """Declare the failures one endpoint can answer with, so the schema carries them too.
+
+    Without this an operation documents its 200 and nothing else, and the client stage 9
+    generates would be typed as though `POST /campaigns` could only succeed. The media type
+    is named explicitly because it is not this API's default — and it is what the handlers
+    actually send.
+    """
+    return {
+        status: {
+            "model": ProblemDetails,
+            "description": HTTPStatus(status).phrase,
+            "content": {PROBLEM_MEDIA_TYPE: {}},
+        }
+        for status in statuses
+    }

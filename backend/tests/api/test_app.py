@@ -20,7 +20,9 @@ def test_the_schema_builds_and_documents_both_probes(app: FastAPI) -> None:
     # when FastAPI resolves the handler's annotations — which happens here.
     schema = app.openapi()
 
-    assert set(schema["paths"]) == {"/healthz", "/readyz"}
+    # A subset since 6.9 put the campaign endpoints on: what this asserts is that the
+    # document builds at all, and the campaign paths are checked where they are written.
+    assert {"/healthz", "/readyz"} <= set(schema["paths"])
     assert schema["info"]["title"] == "AD Robot API"
     assert schema["paths"]["/readyz"]["get"]["responses"]["200"]
 

@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING, Annotated, cast
 from fastapi import Depends, Request
 
 from adrobot.application.ports.persistence import UnitOfWork
+from adrobot.application.use_cases.create_campaign import CreateCampaign, RepairCampaign
+from adrobot.application.use_cases.list_campaigns import ListCampaigns
+from adrobot.application.use_cases.mirror_campaign import ImportCampaign, SyncCampaign
 from adrobot.composition import AppPorts
 from adrobot.settings import Settings
 
@@ -64,6 +67,45 @@ async def _unit_of_work(ports: Annotated[AppPorts, Depends(_ports)]) -> AsyncIte
         yield unit
 
 
+def _create_campaign(
+    ports: Annotated[AppPorts, Depends(_ports)],
+    uow: Annotated[UnitOfWork, Depends(_unit_of_work)],
+) -> CreateCampaign:
+    """Assemble part 1 for this request: process-wide ports, this request's transaction."""
+    return CreateCampaign(
+        admin=ports.admin,
+        uow=uow,
+        references=ports.references,
+        aliases=ports.aliases,
+        clock=ports.clock,
+    )
+
+
+def _repair_campaign(
+    ports: Annotated[AppPorts, Depends(_ports)],
+    uow: Annotated[UnitOfWork, Depends(_unit_of_work)],
+) -> RepairCampaign:
+    return RepairCampaign(admin=ports.admin, uow=uow, clock=ports.clock)
+
+
+def _import_campaign(
+    ports: Annotated[AppPorts, Depends(_ports)],
+    uow: Annotated[UnitOfWork, Depends(_unit_of_work)],
+) -> ImportCampaign:
+    return ImportCampaign(admin=ports.admin, uow=uow, clock=ports.clock)
+
+
+def _sync_campaign(
+    ports: Annotated[AppPorts, Depends(_ports)],
+    uow: Annotated[UnitOfWork, Depends(_unit_of_work)],
+) -> SyncCampaign:
+    return SyncCampaign(admin=ports.admin, uow=uow, clock=ports.clock)
+
+
+def _list_campaigns(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> ListCampaigns:
+    return ListCampaigns(uow=uow)
+
+
 PortsDep = Annotated[AppPorts, Depends(_ports)]
 SettingsDep = Annotated[Settings, Depends(_settings)]
 # `UnitOfWork` is imported above and not under `TYPE_CHECKING`, which is the whole reason
@@ -72,3 +114,12 @@ SettingsDep = Annotated[Settings, Depends(_settings)]
 # exist — and the failure is a NameError at import time if the alias is a forward reference,
 # or a silent demotion to a query parameter if it is not.
 UowDep = Annotated[UnitOfWork, Depends(_unit_of_work)]
+
+# One per scenario, so that a handler names what it does and nothing else. Each is built per
+# request because each holds that request's unit of work; the ports inside them are the
+# process's own and are not rebuilt.
+CreateCampaignDep = Annotated[CreateCampaign, Depends(_create_campaign)]
+RepairCampaignDep = Annotated[RepairCampaign, Depends(_repair_campaign)]
+ImportCampaignDep = Annotated[ImportCampaign, Depends(_import_campaign)]
+SyncCampaignDep = Annotated[SyncCampaign, Depends(_sync_campaign)]
+ListCampaignsDep = Annotated[ListCampaigns, Depends(_list_campaigns)]
