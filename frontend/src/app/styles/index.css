@@ -1,4 +1,9 @@
-@import "tailwindcss";
+@import "tailwindcss" source(none);
+/* Automatic detection walks the whole project, so it harvested `.filter` out of
+   NGINX_ENVSUBST_FILTER and `.inline` out of the CSP's 'unsafe-inline'. Only what is
+   listed here is scanned for class names. */
+@source "../../../index.html";
+@source "../../**/*.{ts,tsx}";
 /* The variants (`data-open`, `data-closed`) and utilities the vendored shadcn
    components are written against, and the animations Radix overlays use. Both are
    resolved by Tailwind at build time and reach no bundle. */
