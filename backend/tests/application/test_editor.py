@@ -15,48 +15,21 @@ import pytest
 
 from adrobot.application.errors import CampaignNotFoundError
 from adrobot.application.use_cases.editor import GetEditorView
-from adrobot.domain.diff import snapshot_hash
-from adrobot.domain.draft import StreamDraft
+from adrobot.domain.draft import DraftOperationKind
 from adrobot.domain.ids import CampaignId, OfferId
 from adrobot.domain.offer import Offer
 from adrobot.domain.stream import StreamOffer, StreamSchema
 from adrobot.domain.values import Share
 from tests.fakes import FIRST_MOMENT, REFERENCE_OFFERS
-from tests.helpers import given_mirrored_campaign, locked_view
+from tests.helpers import given_mirrored_campaign, given_staged_draft, operation
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from adrobot.application.dto import StreamEditorView
-    from adrobot.domain.ids import KeitaroStreamId
     from tests.wiring import FakeWorld
 
 OLDEST, NEWEST = REFERENCE_OFFERS
 ADDED = OfferId(11111)
-
-
-async def stage(
-    world: FakeWorld,
-    campaign_id: CampaignId,
-    stream_id: KeitaroStreamId,
-    edit: Callable[[StreamDraft], StreamDraft],
-) -> None:
-    """Open a draft over the flow as it stands and apply one edit to it, as 7.3 will."""
-    view = await locked_view(world.uow, campaign_id, stream_id)
-    edited = edit(StreamDraft.opened(view.mirror_rows))
-    async with world.uow.begin() as transaction:
-        live = await transaction.drafts.open_for(
-            campaign_id=campaign_id,
-            stream_id=stream_id,
-            rows=view.mirror_rows,
-            base_snapshot_hash=snapshot_hash(view.mirror_rows),
-        )
-        await transaction.drafts.replace_rows(live.id, edited.rows)
-
-
-def rotating(view: StreamEditorView | None) -> StreamEditorView:
-    assert view is not None
-    return view
+ADD, REMOVE = DraftOperationKind.ADD, DraftOperationKind.REMOVE
 
 
 def on_screen(flow: StreamEditorView) -> list[tuple[int, int, bool]]:
@@ -111,7 +84,7 @@ async def test_removing_a_row_recalculates_the_rest_and_sinks_it_to_the_bottom(
     world: FakeWorld,
 ) -> None:
     campaign_id, stream_id = await given_mirrored_campaign(world)
-    await stage(world, campaign_id, stream_id, lambda draft: draft.remove(OLDEST))
+    await given_staged_draft(world, campaign_id, stream_id, operation(REMOVE, OLDEST))
 
     flow = (await GetEditorView(uow=world.uow)(campaign_id)).streams[1]
 
@@ -126,7 +99,7 @@ async def test_removing_a_row_recalculates_the_rest_and_sinks_it_to_the_bottom(
 
 async def test_an_added_offer_takes_the_rounding_remainder(world: FakeWorld) -> None:
     campaign_id, stream_id = await given_mirrored_campaign(world)
-    await stage(world, campaign_id, stream_id, lambda draft: draft.add(ADDED))
+    await given_staged_draft(world, campaign_id, stream_id, operation(ADD, ADDED))
 
     flow = (await GetEditorView(uow=world.uow)(campaign_id)).streams[1]
 
@@ -139,7 +112,9 @@ async def test_a_draft_that_would_leave_no_active_offer_says_why_push_is_dark(
     world: FakeWorld,
 ) -> None:
     campaign_id, stream_id = await given_mirrored_campaign(world)
-    await stage(world, campaign_id, stream_id, lambda draft: draft.remove(OLDEST).remove(NEWEST))
+    await given_staged_draft(
+        world, campaign_id, stream_id, operation(REMOVE, OLDEST), operation(REMOVE, NEWEST)
+    )
 
     flow = (await GetEditorView(uow=world.uow)(campaign_id)).streams[1]
 
@@ -161,7 +136,9 @@ async def test_an_offer_added_and_taken_back_out_reaches_neither_the_summary_nor
     it is why PUSH is live here although the row that was added is gone again.
     """
     campaign_id, stream_id = await given_mirrored_campaign(world)
-    await stage(world, campaign_id, stream_id, lambda draft: draft.add(ADDED).remove(ADDED))
+    await given_staged_draft(
+        world, campaign_id, stream_id, operation(ADD, ADDED), operation(REMOVE, ADDED)
+    )
 
     flow = (await GetEditorView(uow=world.uow)(campaign_id)).streams[1]
 
@@ -176,7 +153,7 @@ async def test_a_flow_fetched_since_the_draft_was_opened_carries_a_warning(
     world: FakeWorld,
 ) -> None:
     campaign_id, stream_id = await given_mirrored_campaign(world)
-    await stage(world, campaign_id, stream_id, lambda draft: draft.add(ADDED))
+    await given_staged_draft(world, campaign_id, stream_id, operation(ADD, ADDED))
 
     async with world.uow.begin() as transaction:
         # FETCH STREAMS FROM KT, landing on a flow somebody has since edited in Keitaro.

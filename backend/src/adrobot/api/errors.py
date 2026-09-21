@@ -44,8 +44,10 @@ from adrobot.application.errors import (
     CampaignNotFoundError,
     CampaignNotRepairableError,
     DraftAlreadyOpenError,
+    DraftBeingPushedError,
     DraftStatusChangedError,
     PushAttemptSettledError,
+    StreamDoesNotRotateOffersError,
     StreamNotFoundError,
     UpstreamDeniedError,
     UpstreamError,
@@ -140,6 +142,12 @@ PROBLEMS: Final[Mapping[type[Exception], Problem]] = {
     ),
     DraftAlreadyOpenError: Problem(
         status=409, code="draft-already-open", title="This flow is already being edited"
+    ),
+    DraftBeingPushedError: Problem(
+        status=409, code="draft-being-pushed", title="This flow is being pushed right now"
+    ),
+    StreamDoesNotRotateOffersError: Problem(
+        status=409, code="flow-rotates-no-offers", title="This flow has no offers to rotate"
     ),
     DraftStatusChangedError: Problem(
         status=409, code="draft-status-changed", title="Somebody moved this draft first"

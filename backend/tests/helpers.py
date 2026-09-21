@@ -17,7 +17,9 @@ from sqlalchemy.schema import CreateIndex, CreateTable, Table
 
 from adrobot.api.routers.health import HEALTH_PATHS
 from adrobot.application.ports.persistence import CampaignSetup
+from adrobot.application.use_cases.edit_draft import EditDraft
 from adrobot.domain.campaign import CampaignSetupStatus
+from adrobot.domain.draft import DraftOperation
 from adrobot.domain.ids import OfferId
 from adrobot.domain.shares import OfferRow
 from adrobot.infrastructure.db import models  # noqa: F401  # registers the tables on Base
@@ -30,7 +32,9 @@ if TYPE_CHECKING:
 
     from fastapi import FastAPI
 
+    from adrobot.application.dto import StreamEditorView
     from adrobot.application.ports.persistence import StreamView, UnitOfWork
+    from adrobot.domain.draft import DraftOperationKind
     from adrobot.domain.ids import CampaignId, KeitaroStreamId
     from tests.wiring import FakeWorld
 
@@ -250,3 +254,25 @@ async def locked_view(
     """Read one flow whole — mirror, pins and live draft — the way every write starts."""
     async with uow.begin() as transaction:
         return await transaction.streams.lock(campaign_id=campaign_id, stream_id=stream_id)
+
+
+def operation(kind: DraftOperationKind, offer_id: int) -> DraftOperation:
+    """One editor operation, short enough that a batch of them reads as a sentence."""
+    return DraftOperation(kind=kind, offer_id=OfferId(offer_id))
+
+
+async def given_staged_draft(
+    world: FakeWorld,
+    campaign_id: CampaignId,
+    stream_id: KeitaroStreamId,
+    *operations: DraftOperation,
+) -> StreamEditorView:
+    """Stage some edits on a flow through the scenario that owns them, never by hand.
+
+    Through `EditDraft` rather than the repositories on purpose: a fixture that opened a
+    draft itself would be a second answer to when one is opened and what it is seeded with,
+    and the tests leaning on it would keep passing after the real one drifted.
+    """
+    return await EditDraft(uow=world.uow)(
+        campaign_id=campaign_id, stream_id=stream_id, operations=operations
+    )

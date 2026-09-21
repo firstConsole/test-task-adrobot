@@ -155,6 +155,37 @@ class DraftAlreadyOpenError(ApplicationError):
         super().__init__(f"flow {stream_id} already has a draft being edited or pushed")
 
 
+class DraftBeingPushedError(ApplicationError):
+    """The flow's draft is in flight to the tracker, so it is nobody's to edit or cancel.
+
+    A push is two short transactions with an HTTP call between them, and the draft is
+    `pushing` for the whole of it. An edit landing in that window would be written into
+    rows the second half is about to close, and a cancel would throw away the very state
+    the tracker is being told to hold.
+    """
+
+    def __init__(self, stream_id: object) -> None:
+        super().__init__(
+            f"flow {stream_id} is being pushed to the tracker: wait for that to finish"
+        )
+
+
+class StreamDoesNotRotateOffersError(ApplicationError):
+    """The flow dispatches clicks some other way, so it has no offer rotation to edit.
+
+    Only a `landings` flow rotates offers. Flow 1 of every campaign this service builds is a
+    `redirect`, and an `offers[]` array on one is ignored by Keitaro — so an editor that
+    accepted the edit would show a share that no click will ever follow, and a push would
+    rewrite a flow whose whole content is the redirect it is about to drop.
+    """
+
+    def __init__(self, stream_id: object, schema: object) -> None:
+        super().__init__(
+            f"flow {stream_id} is a {schema} flow: it rotates no offers, and Keitaro would "
+            f"ignore any this service sent"
+        )
+
+
 class DraftStatusChangedError(ApplicationError):
     """The draft was not in the status the caller expected, so somebody else moved it first."""
 
