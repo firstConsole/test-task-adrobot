@@ -135,11 +135,27 @@ def test_both_columns_that_can_silence_a_row_fold_into_removed(
     assert row.removed is expected
 
 
-def test_a_row_disabled_by_hand_in_keitaro_keeps_the_share_it_is_held_at() -> None:
-    # Zeroing is redistribute()'s rule and diff.py's spelling; a third spelling here is the
-    # one that would disagree with them.
+def test_a_row_disabled_by_hand_in_keitaro_reads_as_taking_nothing() -> None:
+    """The tolerance belongs to the column, not to the kernel row read out of it.
+
+    `stream_offers.share` still holds whatever Keitaro holds, disabled row included — that
+    is what makes the mirror a mirror. But `OfferRow` is what the arithmetic and the screen
+    see, and there `removed` implies a share of 0: it is the invariant `redistribute`
+    maintains on every row it returns, and a mapper handing back `removed=True, share=25`
+    hands back a row the arithmetic itself could not have produced.
+
+    It is also load-bearing twice over. The editor draws a clean flow straight from these
+    rows with no recalculation in between, so a tombstoned row would otherwise sit under the
+    word (removed) showing the percentage it held before the push that dropped it. And
+    `DraftDiff` would report a share change on a row that is disabled on both sides.
+    """
     (row,) = mappers.to_mirror_rows((mirror_row(3717, state="disabled", share=25),), {})
-    assert (row.removed, row.share) == (True, 25)
+    assert (row.removed, row.share) == (True, 0)
+
+
+def test_an_active_row_keeps_whatever_the_tracker_holds_however_little_it_sums_to() -> None:
+    rows = mappers.to_mirror_rows((mirror_row(3749, share=25), mirror_row(3717, share=25)), {})
+    assert shares(rows) == {3749: 25, 3717: 25}, "50% is a real clean state, never normalised"
 
 
 def test_a_pin_is_joined_on_and_moves_no_share() -> None:

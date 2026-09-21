@@ -1,4 +1,4 @@
-"""That the autocomplete's two indexes are used, and not merely present.
+"""That the autocomplete's two indexes are used, and not merely present — and how it ranks.
 
 PLAN-BACKEND §7 asks for this by name: an EXPLAIN is a more convincing artifact of
 "PostgreSQL optimisation" than the index itself. It is also the only thing that can catch
@@ -9,13 +9,19 @@ belongs and a VARCHAR cast where TEXT belongs each autogenerate as an empty migr
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
 
+from adrobot.domain.ids import OfferId
+from adrobot.domain.offer import Offer
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection
+
+    from adrobot.application.ports.persistence import UnitOfWork
 
 # Enough that the planner's choice is a decision and not an accident. Measured on this
 # schema: the id index is already chosen at 5 000 rows, while the trigram index is not chosen
@@ -103,3 +109,25 @@ async def test_both_arms_of_one_search_use_both_indexes(
     assert "BitmapOr" in plan, plan
     assert "ix_offers_id_as_text" in plan, plan
     assert "ix_offers_name_trgm" in plan, plan
+
+
+async def test_an_id_prefix_outranks_a_name_that_merely_contains_it(uow: UnitOfWork) -> None:
+    """The ranking the in-memory catalogue imitates, held to the query that really answers.
+
+    The video types `11104`, which is an id. Both arms of the search match here, and the
+    order between them is the whole usefulness of the box: an offer named after the number
+    must not sit above the offer that *is* the number.
+    """
+    at = datetime(2026, 3, 1, 12, tzinfo=UTC)
+    async with uow.begin() as tx:
+        await tx.offers.upsert_catalogue(
+            (
+                Offer(id=OfferId(11234), name="11104 Special", state="active"),
+                Offer(id=OfferId(11104), name="Oxys", state="active"),
+                Offer(id=OfferId(11104_9), name="Oxys Plus", state="active"),
+            ),
+            at=at,
+        )
+        found = await tx.offers.search("11104", limit=10)
+
+    assert [int(offer.id) for offer in found] == [11104, 111049, 11234]

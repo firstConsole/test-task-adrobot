@@ -18,7 +18,13 @@ from typing import TYPE_CHECKING
 from adrobot.application.reference import ReferenceResolver
 from adrobot.composition import AppPorts
 from tests.fake_persistence import FakeUnitOfWork
-from tests.fakes import FakeAliasFactory, FakeClock, FakeKeitaroAdmin, FakeKeitaroReports
+from tests.fakes import (
+    FakeAliasFactory,
+    FakeClock,
+    FakeCorrelationIds,
+    FakeKeitaroAdmin,
+    FakeKeitaroReports,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -38,6 +44,7 @@ class FakeWorld:
     uow: FakeUnitOfWork
     clock: FakeClock
     aliases: FakeAliasFactory
+    correlation: FakeCorrelationIds
 
 
 def fake_world(
@@ -49,6 +56,7 @@ def fake_world(
     clock = FakeClock()
     uow = FakeUnitOfWork(clock)
     aliases = FakeAliasFactory()
+    correlation = FakeCorrelationIds()
     return FakeWorld(
         ports=AppPorts(
             admin=tracker,
@@ -56,6 +64,7 @@ def fake_world(
             references=ReferenceResolver(tracker, clock),
             aliases=aliases,
             clock=clock,
+            correlation=correlation,
             unit_of_work=partial(_one_unit_of_work, uow),
         ),
         admin=tracker,
@@ -63,6 +72,7 @@ def fake_world(
         uow=uow,
         clock=clock,
         aliases=aliases,
+        correlation=correlation,
     )
 
 

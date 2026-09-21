@@ -56,6 +56,16 @@ class KeitaroAdminPort(ABC):
         """Create one flow of a campaign."""
 
     @abstractmethod
+    async def get_stream(self, stream_id: KeitaroStreamId) -> Stream:
+        """Read one flow on its own, which is what a push looks at before it overwrites it.
+
+        Separate from `list_campaign_streams` because the caller has a flow id and no reason
+        to read its siblings, and because the answer decides whether a push goes ahead at
+        all: the conflict check fingerprints this and compares it with the state the draft
+        was opened on.
+        """
+
+    @abstractmethod
     async def update_stream(self, stream_id: KeitaroStreamId, spec: StreamSpec) -> Stream:
         """Write a flow back whole, `spec` being the state it should be left in."""
 

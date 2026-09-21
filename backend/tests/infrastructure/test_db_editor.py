@@ -18,6 +18,8 @@ from sqlalchemy import text
 from adrobot.application.errors import StreamNotFoundError
 from adrobot.application.ports.persistence import CampaignSetup
 from adrobot.domain.campaign import Campaign, CampaignSetupStatus
+from adrobot.domain.diff import snapshot_hash
+from adrobot.domain.draft import StreamDraft
 from adrobot.domain.ids import CampaignId, KeitaroCampaignId, KeitaroStreamId, OfferId
 from adrobot.domain.shares import redistribute
 from adrobot.domain.stream import (
@@ -128,6 +130,35 @@ async def test_the_editor_read_costs_the_same_four_statements_whatever_the_flow_
 
     assert len(views) == 12
     assert statements.queries == ("SELECT", "SELECT", "SELECT", "SELECT"), statements
+
+
+async def test_a_draft_rewritten_mid_transaction_reads_back_as_it_was_written(
+    uow: UnitOfWork,
+) -> None:
+    """The claim `EditDraft` answers its caller with, held to SQLAlchemy rather than argued.
+
+    `replace_rows` is a DELETE and an INSERT through Core, and the read after it goes through
+    the identity map — where the deleted rows are still sitting. `populate_existing=True` on
+    the loader is what makes the second read the truth; without it the answer a client
+    redraws itself from would be the rows from before its own edit.
+    """
+    mirrored = await given_a_campaign(uow, (flow(FLOW, 1, VIDEO_ROWS),))
+    async with uow.begin() as tx:
+        view = await tx.streams.lock(campaign_id=mirrored.id, stream_id=FLOW)
+        draft = await tx.drafts.open_for(
+            campaign_id=mirrored.id,
+            stream_id=FLOW,
+            rows=view.mirror_rows,
+            base_snapshot_hash=snapshot_hash(view.mirror_rows),
+        )
+        edited = StreamDraft.opened(draft.rows).remove(OfferId(3717))
+        await tx.drafts.replace_rows(draft.id, edited.rows)
+
+        reread = await tx.streams.lock(campaign_id=mirrored.id, stream_id=FLOW)
+
+    assert reread.draft is not None
+    assert shares(reread.draft.rows) == {3749: 50, 11111: 50, 3717: 0}
+    assert [row.removed for row in reread.draft.rows if row.offer_id == 3717] == [True]
 
 
 async def test_a_row_the_tracker_stopped_returning_is_still_drawn(uow: UnitOfWork) -> None:

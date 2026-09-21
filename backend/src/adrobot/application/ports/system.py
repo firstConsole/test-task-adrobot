@@ -1,14 +1,15 @@
 """The facts a use case cannot be handed as an argument, behind ports like everything else.
 
 What is here is what makes a scenario's answer depend on something other than its inputs —
-the wall clock so far, the random alphabet of an alias at 6.3. Both are one line of the
-standard library, and behind a port for the same reason the tracker is: a test that cannot
-say what time it is has to sleep, and a test that cannot say which alias will be generated
-has to read the answer it is checking.
+the wall clock, the random alphabet of an alias, the id of the request being served. Each is
+one or two lines of the standard library, and behind a port for the same reason the tracker
+is: a test that cannot say what time it is has to sleep, one that cannot say which alias
+will be generated has to read the answer it is checking, and one that cannot say which
+correlation id a push will record cannot assert on the audit row at all.
 
-Neither method is `async`. Every other port in this package is a call that leaves the
-process and every method on it is awaited; these two reach no further than this machine,
-and an `async def now()` would only make `await` the price of asking what time it is.
+No method here is `async`. Every other port in this package is a call that leaves the
+process and every method on it is awaited; these reach no further than this machine, and an
+`async def now()` would only make `await` the price of asking what time it is.
 """
 
 from __future__ import annotations
@@ -59,3 +60,21 @@ class AliasFactory(ABC):
     @abstractmethod
     def new(self) -> CampaignAlias:
         """Generate one alias. Returns the validated type, so an unusable one cannot leave."""
+
+
+class CorrelationIds(ABC):
+    """The id tying one request's log lines, its problem body and its audit row together.
+
+    Behind a port rather than read from `adrobot.logging` directly, which would be one
+    import and would also drag structlog into a ring whose whole claim is that it depends on
+    nothing. The value itself is a `ContextVar` the HTTP middleware binds; what a use case
+    needs to know is only that asking for it always yields one.
+    """
+
+    @abstractmethod
+    def current(self) -> str:
+        """Return the id of the work being done, minting one where nothing has bound it.
+
+        Never `None`, unlike the accessor underneath: `push_attempts.correlation_id` is NOT
+        NULL, and a CLI push is work worth correlating even though no request began it.
+        """

@@ -35,7 +35,9 @@ from starlette.exceptions import HTTPException
 from adrobot.api.schemas.problem import (
     PROBLEM_MEDIA_TYPE,
     PROBLEM_TYPE_PREFIX,
+    ConflictingState,
     InvalidField,
+    OfferShare,
     ProblemDetails,
 )
 from adrobot.application.errors import (
@@ -44,8 +46,13 @@ from adrobot.application.errors import (
     CampaignNotFoundError,
     CampaignNotRepairableError,
     DraftAlreadyOpenError,
+    DraftBeingPushedError,
+    DraftConflictError,
     DraftStatusChangedError,
+    NothingToPushError,
     PushAttemptSettledError,
+    PushBlockedError,
+    StreamDoesNotRotateOffersError,
     StreamNotFoundError,
     UpstreamDeniedError,
     UpstreamError,
@@ -74,6 +81,8 @@ if TYPE_CHECKING:
 
     from fastapi import FastAPI, Request
     from starlette.responses import Response
+
+    from adrobot.domain.diff import DesiredOffer
 
 logger = structlog.stdlib.get_logger(__name__)
 
@@ -141,11 +150,26 @@ PROBLEMS: Final[Mapping[type[Exception], Problem]] = {
     DraftAlreadyOpenError: Problem(
         status=409, code="draft-already-open", title="This flow is already being edited"
     ),
+    DraftBeingPushedError: Problem(
+        status=409, code="draft-being-pushed", title="This flow is being pushed right now"
+    ),
+    StreamDoesNotRotateOffersError: Problem(
+        status=409, code="flow-rotates-no-offers", title="This flow has no offers to rotate"
+    ),
     DraftStatusChangedError: Problem(
         status=409, code="draft-status-changed", title="Somebody moved this draft first"
     ),
     PushAttemptSettledError: Problem(
         status=409, code="push-attempt-settled", title="This push is already finished"
+    ),
+    NothingToPushError: Problem(
+        status=409, code="nothing-to-push", title="There is nothing here to push"
+    ),
+    DraftConflictError: Problem(
+        status=409, code="draft-conflict", title="This flow was edited in Keitaro meanwhile"
+    ),
+    PushBlockedError: Problem(
+        status=409, code="push-blocked", title="This flow cannot be pushed as it stands"
     ),
     OfferAlreadyInStreamError: Problem(
         status=409, code="offer-already-in-flow", title="That offer is already in this flow"
@@ -270,6 +294,7 @@ def _rendered(exc: Exception, *, problem: Problem, expose_internals: bool) -> JS
         detail=detail,
         campaign_id=getattr(exc, "campaign_id", None),
         errors=_tracker_fields(exc),
+        conflict=_conflict(exc),
         headers=problem.headers,
     )
 
@@ -309,12 +334,13 @@ def _http_error(exc: Exception) -> JSONResponse:
     )
 
 
-def _response(
+def _response(  # noqa: PLR0913  # one keyword per optional member of the problem body
     *,
     problem: Problem,
     detail: str,
     campaign_id: object = None,
     errors: Sequence[InvalidField] | None = None,
+    conflict: ConflictingState | None = None,
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     """Serialise one problem, leaving out every member that has nothing to say."""
@@ -327,6 +353,7 @@ def _response(
         correlation_id=correlation_id(),
         campaign_id=campaign_id if isinstance(campaign_id, UUID) else None,
         errors=tuple(errors) if errors else None,
+        conflict=conflict,
     )
     return JSONResponse(
         status_code=problem.status,
@@ -334,6 +361,26 @@ def _response(
         media_type=PROBLEM_MEDIA_TYPE,
         headers=dict(headers) if headers else None,
     )
+
+
+def _conflict(exc: Exception) -> ConflictingState | None:
+    """Render the two readings a push conflict carries, or nothing for every other failure.
+
+    Read off the exception rather than branched on its type, the way `campaign_id` and the
+    tracker's field complaints already are: this table decides what a failure is worth in
+    HTTP, and a chain of `isinstance` here would make it decide what each one *is*.
+    """
+    held, wanted = getattr(exc, "held", None), getattr(exc, "wanted", None)
+    if held is None or wanted is None:
+        return None
+    return ConflictingState(
+        tracker_holds=tuple(_offer_share(row) for row in held),
+        push_would_write=tuple(_offer_share(row) for row in wanted),
+    )
+
+
+def _offer_share(row: DesiredOffer) -> OfferShare:
+    return OfferShare(offer_id=row.offer_id, share=row.share, state=row.state.value)
 
 
 def _tracker_fields(exc: Exception) -> tuple[InvalidField, ...]:

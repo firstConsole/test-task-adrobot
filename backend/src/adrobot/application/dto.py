@@ -1,4 +1,4 @@
-"""What the use cases of part 1 are asked for, and what they answer with.
+"""What the use cases are asked for, and what they answer with.
 
 Three rules decide the shapes below, and each of them is a decision rather than a habit.
 
@@ -25,11 +25,18 @@ lets the API rename a field without a use case hearing about it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
-from adrobot.application.ports.persistence import CampaignCursor, MirroredCampaign
+from adrobot.application.ports.persistence import (
+    CampaignCursor,
+    MirroredCampaign,
+    MirroredStream,
+)
 from adrobot.domain.campaign import public_link
+from adrobot.domain.diff import DraftDiff
 from adrobot.domain.ids import OfferId
+from adrobot.domain.offer import Offer
 from adrobot.domain.values import CampaignName, CountryCode
 
 DEFAULT_PAGE_SIZE: Final = 20
@@ -39,6 +46,16 @@ MAX_PAGE_SIZE: Final = 100
 """The largest page this service will build. Bounded at the edge, where a client-supplied
 number can still be answered with a 422 naming the parameter; a use case that clamped
 silently would hand back a shorter page than it was asked for and say nothing about it."""
+
+
+DEFAULT_OFFER_LIMIT: Final = 20
+"""One dropful of the offer combobox, and the default for a caller that says nothing."""
+
+MAX_OFFER_LIMIT: Final = 200
+"""What SHOW ALL OFFERS gets, and the bound on any search. A tracker's catalogue runs to
+thousands; a combobox holding thousands is not a widget anybody uses, and typing two
+characters is how the rest of it is reached. Bounded at the edge, where a client-supplied
+number can still be answered with a 422 naming the parameter."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -120,3 +137,73 @@ class CampaignsPage:
 
     campaigns: tuple[CampaignView, ...]
     next_cursor: CampaignCursor | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EditorRow:
+    """One line of a flow's offer table, carrying everything the screen prints on it.
+
+    `offer` is the catalogue's label and is `None` for an offer the local mirror has never
+    heard of — which renders as `#11234 (not in catalogue)` rather than emptying the screen.
+    There is no foreign key from a flow row to the catalogue and there is not meant to be:
+    an offer reaches a flow in Keitaro before it reaches our copy of `GET /offers`.
+
+    `share` is whatever `redistribute()` last wrote, never recomputed on the way out. A pin
+    must move no share until the next edit, and a recalculation at render time is exactly
+    how that guarantee would be lost.
+    """
+
+    offer_id: OfferId
+    offer: Offer | None = None
+    share: int = 0
+    pinned_share: int | None = None
+    removed: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StreamEditorView:
+    """One flow as the editor draws it: the rows, and the answers about the buttons above them.
+
+    The three flags are the whole reason this is assembled on the server. The frontend has
+    no `redistribute()` of its own and must not grow one, so it cannot decide whether a push
+    is allowed either — it formats `can_push`, `block_reason` and `warnings` and nothing
+    more.
+
+    `dirty` is "a draft is live", not "the draft would change something". The two part
+    company when an offer is added and taken back out again: nothing would be written, so
+    `can_push` is false, and CANCEL still has a draft to discard.
+    """
+
+    stream: MirroredStream
+    rows: tuple[EditorRow, ...]
+    dirty: bool = False
+    diff: DraftDiff | None = None
+    can_push: bool = False
+    block_reason: str | None = None
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EditorView:
+    """One campaign's flows, in the one answer the editor screen opens on.
+
+    The campaign travels with them because the toolbar is made of it: the link into Keitaro,
+    the public URL, and the name in the heading. Two calls would let the screen render a
+    campaign beside somebody else's flows for one frame.
+    """
+
+    campaign: CampaignView
+    streams: tuple[StreamEditorView, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OfferCatalogueSync:
+    """What one pass of the catalogue sync did.
+
+    `synced_at` is `None` when nothing was written, which is the honest answer for a tracker
+    that listed no offers at all — see `SyncOfferCatalogue` for why that is not treated as
+    an empty catalogue.
+    """
+
+    offers: int = 0
+    synced_at: datetime | None = None
