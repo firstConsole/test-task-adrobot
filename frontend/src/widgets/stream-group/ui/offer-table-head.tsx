@@ -12,16 +12,16 @@ export function OfferTableHead() {
     <TableHeader>
       <TableRow className="hover:bg-transparent">
         <TableHead scope="col" className="w-1/2">
-          Offer
+          Оффер
         </TableHead>
         <TableHead scope="col" className="w-24">
-          Share
+          Доля
         </TableHead>
         <TableHead scope="col" className="w-24">
-          Stats
+          Клики
         </TableHead>
         <TableHead scope="col" className="w-40 text-right">
-          Actions
+          Действия
         </TableHead>
       </TableRow>
     </TableHeader>

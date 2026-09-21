@@ -26,10 +26,10 @@ export function useSyncStreams(campaignId: string) {
       ),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey })
-      toast.success('Read again from Keitaro.')
+      toast.success('Прочитано из Keitaro заново.')
     },
     onError: (error) => {
-      toast.error(problemMessage(error, 'Keitaro could not be read.'))
+      toast.error(problemMessage(error, 'Keitaro не удалось прочитать.'))
     },
   })
 

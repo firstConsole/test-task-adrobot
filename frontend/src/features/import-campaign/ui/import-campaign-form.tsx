@@ -8,7 +8,7 @@ import { ApiError } from '@/shared/api/client'
 import { campaignStreamsPath } from '@/shared/config/routes'
 import { readRefusals } from '@/shared/lib/refusals'
 import { Button } from '@/shared/ui/button'
-import { Field, FieldDescription, FieldError, FieldLabel } from '@/shared/ui/field'
+import { Field, FieldError, FieldLabel } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
 
 import { useImportCampaign } from '../api/use-import-campaign'
@@ -36,8 +36,8 @@ export function ImportCampaignForm() {
 
     adopt.mutate(keitaroCampaignId, {
       onSuccess: (campaign) => {
-        toast.success(`${campaign.name} is open here now.`, {
-          description: `Read from Keitaro campaign ${String(campaign.keitaro_campaign_id)}, with its flows.`,
+        toast.success(`${campaign.name} теперь открыта здесь.`, {
+          description: `Прочитана из кампании Keitaro ${String(campaign.keitaro_campaign_id)}, вместе с потоками.`,
         })
         void navigate(campaignStreamsPath(campaign.id))
       },
@@ -46,7 +46,7 @@ export function ImportCampaignForm() {
         // so this is a refusal that can be honoured instead of reported.
         const already = error instanceof ApiError ? error.problem.campaign_id : null
         if (already !== null && already !== undefined) {
-          toast.info(`Campaign ${String(keitaroCampaignId)} was already open here.`)
+          toast.info(`Кампания ${String(keitaroCampaignId)} здесь уже была открыта.`)
           void navigate(campaignStreamsPath(already))
           return
         }
@@ -61,7 +61,7 @@ export function ImportCampaignForm() {
             type: 'server',
             // One field, so everything this refusal has to say says it here — a 404 from the
             // tracker included, which is the common one and reads perfectly under the input.
-            message: first?.message ?? `${refusals.message ?? 'The import failed.'}${quoted}`,
+            message: first?.message ?? `${refusals.message ?? 'Импорт не удался.'}${quoted}`,
           },
           { shouldFocus: true },
         )
@@ -78,7 +78,7 @@ export function ImportCampaignForm() {
       }}
     >
       <Field>
-        <FieldLabel htmlFor="import-campaign-id">Open one from Keitaro</FieldLabel>
+        <FieldLabel htmlFor="import-campaign-id">Открыть из Keitaro</FieldLabel>
         <div className="flex items-start gap-2">
           <Input
             {...form.register('keitaro_campaign_id')}
@@ -95,9 +95,6 @@ export function ImportCampaignForm() {
             {adopt.isPending ? 'READING…' : 'IMPORT'}
           </Button>
         </div>
-        <FieldDescription>
-          A campaign built by hand, or by somebody else, with everything already in it.
-        </FieldDescription>
         <FieldError errors={[form.formState.errors.keitaro_campaign_id]} />
       </Field>
     </form>

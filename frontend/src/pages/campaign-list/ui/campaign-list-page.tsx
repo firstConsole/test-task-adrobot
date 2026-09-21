@@ -26,17 +26,16 @@ export function CampaignListPage() {
   return (
     <section className="space-y-6">
       <div>
-        <h2 className="text-lg font-medium">Campaigns</h2>
+        <h2 className="text-lg font-medium">Кампании</h2>
         <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
-          Everything this service has a mirror of — the campaigns it built and the ones it was
-          handed. Open one to edit the offers its second flow rotates.
+          Откройте кампанию, чтобы править офферы, которые крутит её второй поток.
         </p>
       </div>
 
       <div className="flex flex-wrap items-end justify-between gap-6">
         <div className="min-w-64 flex-1">
           <label htmlFor="campaign-search" className="sr-only">
-            Search campaigns
+            Поиск кампаний
           </label>
           <div className="relative">
             <SearchIcon className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
@@ -46,7 +45,7 @@ export function CampaignListPage() {
               onChange={(event) => {
                 setTerm(event.target.value)
               }}
-              placeholder="Search by name or alias…"
+              placeholder="Поиск по имени или алиасу…"
               autoComplete="off"
               className="pl-8"
             />
@@ -58,7 +57,7 @@ export function CampaignListPage() {
 
       {campaigns.isError ? (
         <p role="alert" className="text-destructive text-sm">
-          {problemMessage(campaigns.error, 'The campaigns could not be read.')}
+          {problemMessage(campaigns.error, 'Кампании не удалось прочитать.')}
           {campaigns.error instanceof ApiError && campaigns.error.correlationId !== null
             ? ` (${campaigns.error.correlationId})`
             : null}
@@ -68,12 +67,12 @@ export function CampaignListPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Campaign</TableHead>
+                <TableHead>Кампания</TableHead>
                 <TableHead>Keitaro</TableHead>
-                <TableHead>Geo</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead className="text-right">Tracker</TableHead>
+                <TableHead>Гео</TableHead>
+                <TableHead>Статус</TableHead>
+                <TableHead>Создана</TableHead>
+                <TableHead className="text-right">Трекер</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody className={campaigns.isPlaceholderData ? 'opacity-50' : undefined}>
@@ -95,14 +94,14 @@ export function CampaignListPage() {
                   >
                     {settled.trim() === '' ? (
                       <>
-                        Nothing here yet.{' '}
+                        Здесь пока пусто.{' '}
                         <Link to={ROUTES.campaignCreate} className="underline underline-offset-4">
-                          Build one
-                        </Link>
-                        , or open a campaign Keitaro already has by its id.
+                          Создайте кампанию
+                        </Link>{' '}
+                        — или откройте по id ту, что уже есть в Keitaro.
                       </>
                     ) : (
-                      <>No campaign here matches “{settled.trim()}”.</>
+                      <>Под «{settled.trim()}» здесь ничего нет.</>
                     )}
                   </TableCell>
                 </TableRow>

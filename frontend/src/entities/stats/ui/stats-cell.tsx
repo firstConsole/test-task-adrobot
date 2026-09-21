@@ -22,17 +22,17 @@ type StatsCellProps = {
  */
 export function StatsCell({ numbers, offerId, offerName }: StatsCellProps) {
   if (numbers === null) {
-    return <Skeleton className="h-4 w-8" aria-label={`reading the clicks of ${offerName}`} />
+    return <Skeleton className="h-4 w-8" aria-label={`читаю клики оффера ${offerName}`} />
   }
 
   if (!numbers.available) {
     return (
       <span
         className="text-muted-foreground"
-        title={numbers.unavailableReason ?? 'The tracker would not build the report.'}
+        title={numbers.unavailableReason ?? 'Трекер не собрал отчёт.'}
       >
         <span aria-hidden>—</span>
-        <span className="sr-only">no numbers for {offerName}</span>
+        <span className="sr-only">нет чисел по офферу {offerName}</span>
       </span>
     )
   }
@@ -43,7 +43,7 @@ export function StatsCell({ numbers, offerId, offerName }: StatsCellProps) {
   return (
     <span className="tabular-nums">
       {String(row.clicks)}
-      <span className="sr-only"> clicks</span>
+      <span className="sr-only"> кликов</span>
       {row.conversions === 0 ? null : (
         <span className="text-muted-foreground"> · {String(row.conversions)} cv</span>
       )}

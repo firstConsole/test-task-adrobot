@@ -23,7 +23,7 @@ type OfferRowProps = {
 /**
  * One line of a flow's offer table.
  *
- * A removed row is drawn, not hidden: greyed, at 0%, saying `(removed)` in words, and
+ * A removed row is drawn, not hidden: greyed, at 0%, saying `(убран)` in words, and
  * offering `BRING BACK` where the others offer `REMOVE`. It survives a push — the flow is
  * written with that offer explicitly disabled rather than dropped — which is the behaviour
  * the reference tool is recognised by.
@@ -40,12 +40,12 @@ export function OfferRow({
 
   return (
     <TableRow
-      aria-label={`${offerName} in ${streamName}${row.removed ? ', removed' : ''}`}
+      aria-label={`${offerName} в потоке ${streamName}${row.removed ? ', убран' : ''}`}
       className={cn(ROW_STYLE[status], row.removed ? REMOVED_ROW : null)}
     >
       <TableCell className="whitespace-normal">
         <OfferLabel offerId={row.offer_id} offer={row.offer} withPreview />
-        {row.removed ? <span className="ml-1.5">(removed)</span> : null}
+        {row.removed ? <span className="ml-1.5">(убран)</span> : null}
       </TableCell>
       <TableCell>
         <ShareCell

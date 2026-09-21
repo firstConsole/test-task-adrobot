@@ -80,11 +80,11 @@ export function ConflictDialog({
     >
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>{stream.name} has moved in Keitaro</DialogTitle>
+          <DialogTitle>{stream.name} уехал в Keitaro</DialogTitle>
           <DialogDescription>
-            Somebody edited this flow in the tracker after this draft was opened, so nothing has
-            been written. Close this and press FETCH STREAMS FROM KT to start again from what
-            the tracker holds — or write over it.
+            Этот поток правили в трекере после того, как открылся черновик, поэтому ничего не
+            записано. Закройте окно и нажмите FETCH STREAMS FROM KT, чтобы начать с того, что
+            лежит в трекере, — или перезапишите его.
           </DialogDescription>
         </DialogHeader>
 
@@ -92,13 +92,13 @@ export function ConflictDialog({
           <thead>
             <tr className="text-muted-foreground border-border border-b text-left text-xs">
               <th scope="col" className="py-1 font-medium">
-                Offer
+                Оффер
               </th>
               <th scope="col" className="py-1 font-medium">
-                In Keitaro now
+                Сейчас в Keitaro
               </th>
               <th scope="col" className="py-1 font-medium">
-                Push would write
+                PUSH запишет
               </th>
             </tr>
           </thead>
@@ -119,7 +119,7 @@ export function ConflictDialog({
                   </td>
                   <td className="py-1.5 tabular-nums">{describe(side.theirs)}</td>
                   <td className={cn('py-1.5 tabular-nums', differs && 'font-medium text-amber-800')}>
-                    {differs ? <span className="sr-only">differs: </span> : null}
+                    {differs ? <span className="sr-only">расходится: </span> : null}
                     {describe(side.ours)}
                   </td>
                 </tr>

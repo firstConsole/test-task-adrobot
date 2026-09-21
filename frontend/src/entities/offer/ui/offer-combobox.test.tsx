@@ -41,7 +41,7 @@ describe('the offer combobox', () => {
 
     renderWithQuery(<Harness onPick={onPick} />)
     await user.click(screen.getByRole('combobox'))
-    await user.type(screen.getByPlaceholderText(/search by id or name/i), '11104')
+    await user.type(screen.getByPlaceholderText(/поиск по id или имени/i), '11104')
 
     // The server was asked, once the typing settled, with what was typed.
     await waitFor(() => {
@@ -58,13 +58,37 @@ describe('the offer combobox', () => {
     expect(onPick).toHaveBeenCalledWith(FOUND)
   })
 
-  it('says when the catalogue has nothing, in the reference tool’s own words', async () => {
+  it('tells an unread catalogue apart from an offer that is not there', async () => {
+    // With no term typed this endpoint answers SHOW ALL OFFERS, so an empty answer means the
+    // local copy is empty — a different problem from a search that matched nothing, and the
+    // only one of the two a button can fix.
     const user = userEvent.setup()
     serveApi(() => ({ body: { offers: [] } }))
 
     renderWithQuery(<Harness onPick={vi.fn()} />)
     await user.click(screen.getByRole('combobox'))
 
-    expect(await screen.findByText('No results found')).toBeInTheDocument()
+    expect(await screen.findByText(/каталог пуст/i)).toBeInTheDocument()
+
+    await user.type(screen.getByPlaceholderText(/поиск по id или имени/i), 'nutrizen')
+
+    expect(await screen.findByText('Ничего не нашлось')).toBeInTheDocument()
+  })
+
+  it('offers what it was given for an empty answer, and nothing when it was given none', async () => {
+    const user = userEvent.setup()
+    serveApi(() => ({ body: { offers: [] } }))
+
+    const { unmount } = renderWithQuery(
+      <OfferCombobox value={null} onChange={vi.fn()} empty={<button type="button">SYNC</button>} />,
+    )
+    await user.click(screen.getByRole('combobox'))
+    expect(await screen.findByRole('button', { name: 'SYNC' })).toBeInTheDocument()
+    unmount()
+
+    renderWithQuery(<Harness onPick={vi.fn()} />)
+    await user.click(screen.getByRole('combobox'))
+    await screen.findByText(/каталог пуст/i)
+    expect(screen.queryByRole('button', { name: 'SYNC' })).not.toBeInTheDocument()
   })
 })

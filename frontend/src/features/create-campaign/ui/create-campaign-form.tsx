@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { TriangleAlertIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { useNavigate } from 'react-router'
@@ -33,7 +34,12 @@ import { GeoSelect } from './geo-select'
  * the API refuses again, over rules only it can hold — an offer that is not in the tracker,
  * a geo the campaign's own group forbids — and its 422 lands on the field it names.
  */
-export function CreateCampaignForm() {
+/**
+ * `offerEmpty` is whatever should be offered when the catalogue answers with nothing — the
+ * button that reads it from Keitaro. It arrives as a prop because that button is a feature
+ * and so is this form: sibling slices do not import each other, so the page hands it over.
+ */
+export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = {}) {
   const form = useForm({
     resolver: zodResolver(createCampaignSchema),
     defaultValues: EMPTY_CAMPAIGN,
@@ -103,7 +109,7 @@ export function CreateCampaignForm() {
             name="name"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="campaign-name">Name</FieldLabel>
+                <FieldLabel htmlFor="campaign-name">Имя</FieldLabel>
                 <Input
                   {...field}
                   id="campaign-name"
@@ -111,7 +117,7 @@ export function CreateCampaignForm() {
                   placeholder="Summer MX — Oxys"
                   aria-invalid={fieldState.invalid || undefined}
                 />
-                <FieldDescription>What the campaign is called in the tracker.</FieldDescription>
+                <FieldDescription>Как кампания называется в трекере.</FieldDescription>
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
@@ -122,7 +128,7 @@ export function CreateCampaignForm() {
             name="country"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="campaign-geo">Geo</FieldLabel>
+                <FieldLabel htmlFor="campaign-geo">Гео</FieldLabel>
                 <GeoSelect
                   id="campaign-geo"
                   ref={field.ref}
@@ -132,7 +138,7 @@ export function CreateCampaignForm() {
                   invalid={fieldState.invalid}
                 />
                 <FieldDescription>
-                  Flow 1 catches this country and sends it to google.com.
+                  Flow 1 ловит эту страну и уводит её на google.com.
                 </FieldDescription>
                 <FieldError errors={[fieldState.error]} />
               </Field>
@@ -144,7 +150,7 @@ export function CreateCampaignForm() {
             name="offer_id"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="campaign-offer">Offer</FieldLabel>
+                <FieldLabel htmlFor="campaign-offer">Оффер</FieldLabel>
                 <OfferCombobox
                   id="campaign-offer"
                   ref={field.ref}
@@ -155,9 +161,10 @@ export function CreateCampaignForm() {
                   }}
                   onBlur={field.onBlur}
                   invalid={fieldState.invalid}
+                  empty={offerEmpty}
                 />
                 <FieldDescription>
-                  Flow 2 rotates the offers and starts with this one at 100%.
+                  Flow 2 крутит офферы и начинает с этого, на 100%.
                 </FieldDescription>
                 <FieldError errors={[fieldState.error]} />
 
@@ -189,7 +196,7 @@ export function CreateCampaignForm() {
             </Button>
             {create.isPending ? (
               <span role="status" className="text-muted-foreground text-sm">
-                Writing the campaign and its two flows to Keitaro…
+                Пишу кампанию и два её потока в Keitaro…
               </span>
             ) : null}
           </Field>

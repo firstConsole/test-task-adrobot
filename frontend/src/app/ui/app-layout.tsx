@@ -5,8 +5,8 @@ import { ROUTES } from '@/shared/config/routes'
 import { Toaster } from '@/shared/ui/sonner'
 
 const NAV = [
-  { to: ROUTES.campaignList, label: 'Campaigns', end: true },
-  { to: ROUTES.campaignCreate, label: 'New campaign', end: false },
+  { to: ROUTES.campaignList, label: 'Кампании', end: true },
+  { to: ROUTES.campaignCreate, label: 'Новая кампания', end: false },
 ]
 
 export function AppLayout() {

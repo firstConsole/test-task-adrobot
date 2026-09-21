@@ -25,12 +25,12 @@ export const createCampaignSchema = z.object({
   name: z
     .string()
     .trim()
-    .min(1, 'Give the campaign a name — it is how you will find it in the tracker.')
-    .max(MAX_NAME, `Keitaro takes at most ${String(MAX_NAME)} characters.`),
+    .min(1, 'Дайте кампании имя — по нему вы найдёте её в трекере.')
+    .max(MAX_NAME, `Keitaro принимает не больше ${String(MAX_NAME)} символов.`),
   country: z
     .string()
-    .refine((code) => findCountry(code) !== null, 'Pick the country Flow 1 catches.'),
-  offer_id: z.number().int().positive('Pick the offer Flow 2 rotates.'),
+    .refine((code) => findCountry(code) !== null, 'Выберите страну, которую ловит Flow 1.'),
+  offer_id: z.number().int().positive('Выберите оффер, который крутит Flow 2.'),
 })
 
 export type CreateCampaignValues = z.infer<typeof createCampaignSchema>
