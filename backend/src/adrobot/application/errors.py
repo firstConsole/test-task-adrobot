@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from adrobot.domain.diff import DesiredOffer
     from adrobot.domain.draft import DraftStatus
     from adrobot.domain.ids import CampaignId
 
@@ -195,6 +196,34 @@ class DraftStatusChangedError(ApplicationError):
         super().__init__(
             f"the draft is {found.value} and not {expected.value}: another request moved it"
         )
+
+
+class DraftConflictError(ApplicationError):
+    """The flow in Keitaro is not the flow this draft was opened on.
+
+    Somebody edited it in the tracker meanwhile, so pushing would silently overwrite their
+    work. The two states travel with the refusal — what Keitaro holds now, and what this
+    push was about to write — because "there is a conflict" is not something anybody can
+    act on and "these two rows differ" is.
+
+    There is no rebase. Replaying the journal over somebody else's flow would produce a
+    third state neither person asked for; the two honest answers are to overwrite
+    deliberately or to throw the draft away, and both are buttons.
+    """
+
+    def __init__(
+        self,
+        stream_id: object,
+        *,
+        held: tuple[DesiredOffer, ...],
+        wanted: tuple[DesiredOffer, ...],
+    ) -> None:
+        super().__init__(
+            f"flow {stream_id} has been edited in Keitaro since this draft was opened: "
+            f"pushing it now would overwrite those changes"
+        )
+        self.held = held
+        self.wanted = wanted
 
 
 class NothingToPushError(ApplicationError):

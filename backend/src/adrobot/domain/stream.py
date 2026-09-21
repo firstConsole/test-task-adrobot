@@ -27,14 +27,21 @@ mirror of somebody else's data is tolerant.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
+from typing import Final
 
 from adrobot.domain.diff import DesiredOffer
 from adrobot.domain.errors import DuplicateOfferRowError
 from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
+from adrobot.domain.shares import OfferRow
+from adrobot.domain.values import OfferState
+
+_OLDEST: Final = datetime.min.replace(tzinfo=UTC)
+"""Where a row the tracker gave no stamp for ranks. Aware, so it can never meet an aware
+stamp and raise mid-comparison."""
 
 
 class StreamSchema(Enum):
@@ -201,3 +208,38 @@ class Stream:
             landings=self.landings,
             offers=offers,
         )
+
+
+def offer_rows(offers: Sequence[StreamOffer]) -> tuple[OfferRow, ...]:
+    """Read a flow's offer rows as the arithmetic sees them, ordered the way the tie-break is.
+
+    The one reading of a flow that arrived over the wire, as `to_mirror_rows` is the one
+    reading of a flow that came out of our own tables — and the two have to agree, because
+    the conflict check fingerprints one and compares it with the other. The agreement is
+    asserted rather than assumed: see `test_push_conflict.py`.
+
+    Ascending by the tracker's own creation stamp, so the most recently created row holds the
+    largest ordinal and takes the rounding remainder. A row the tracker gave no stamp for
+    ranks oldest and can therefore never take it, which is the conservative way round.
+    """
+    ordered = sorted(
+        offers, key=lambda row: (row.created_at or _OLDEST, row.row_id or 0, row.offer_id)
+    )
+    return tuple(
+        OfferRow(
+            offer_id=row.offer_id,
+            seq=ordinal,
+            activated_at=ordinal,
+            # A row that takes no traffic reads 0, whatever number the tracker keeps beside
+            # it — the invariant `redistribute` holds on every row it returns, and the one
+            # that lets this fingerprint match the mirror's for a disabled row.
+            share=0 if _takes_no_traffic(row) else row.share,
+            removed=_takes_no_traffic(row),
+        )
+        for ordinal, row in enumerate(ordered, start=1)
+    )
+
+
+def _takes_no_traffic(row: StreamOffer) -> bool:
+    """Whether Keitaro is sending this row nothing, which is anything but `active`."""
+    return row.state != OfferState.ACTIVE.value

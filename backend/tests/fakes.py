@@ -202,6 +202,11 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         return stream
 
     @override
+    async def get_stream(self, stream_id: KeitaroStreamId) -> Stream:
+        self._called("get_stream")
+        return self._stream(stream_id)
+
+    @override
     async def update_stream(self, stream_id: KeitaroStreamId, spec: StreamSpec) -> Stream:
         self._called("update_stream")
         current = self._stream(stream_id)

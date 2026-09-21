@@ -26,6 +26,18 @@ Three details, each of which is a defect in the version that leaves it out:
     back to `open` with its rows exactly as they were, and the audit row records which kind
     of failure it was. Losing somebody's edits to a bad minute on the network is not a
     trade this service makes.
+
+And one read before the write. The draft remembers the fingerprint of the flow it was opened
+on; phase 2 reads the flow out of Keitaro and compares. A flow that has moved since means
+somebody edited it in the tracker, and pushing would overwrite their work without either
+person ever seeing it happen — so the push stops and says what the two states are. The
+comparison is against **the tracker** and not against our own mirror: the mirror is a cache
+whose staleness is nobody's fault, and the tracker is what is about to be overwritten.
+
+There is no rebase, deliberately. Replaying the journal over somebody else's flow produces a
+third state neither of them asked for. The two honest answers are to overwrite on purpose —
+`overwrite=True`, which is a button somebody presses after reading the difference — or to
+throw the draft away.
 """
 
 from __future__ import annotations
@@ -36,6 +48,7 @@ from typing import TYPE_CHECKING, Final
 
 from adrobot.application.errors import (
     DraftBeingPushedError,
+    DraftConflictError,
     NothingToPushError,
     PushBlockedError,
     UpstreamError,
@@ -48,9 +61,10 @@ from adrobot.application.use_cases.edit_draft import (
     rendered,
 )
 from adrobot.application.use_cases.editor import block_reason
-from adrobot.domain.diff import DesiredOffer, DraftDiff
+from adrobot.domain.diff import DesiredOffer, DraftDiff, desired_state, snapshot_hash
 from adrobot.domain.draft import DraftStatus
 from adrobot.domain.ids import DraftId, PushAttemptId
+from adrobot.domain.stream import offer_rows
 
 if TYPE_CHECKING:
     from adrobot.application.dto import StreamEditorView
@@ -81,6 +95,7 @@ class ClaimedPush:
     draft_id: DraftId
     attempt_id: PushAttemptId
     desired: tuple[DesiredOffer, ...]
+    base_snapshot_hash: str
 
 
 def outcome_of(failure: UpstreamError) -> PushOutcome:
@@ -115,17 +130,27 @@ class PushDraft:
         self._correlation = correlation
 
     async def __call__(
-        self, *, campaign_id: CampaignId, stream_id: KeitaroStreamId
+        self, *, campaign_id: CampaignId, stream_id: KeitaroStreamId, overwrite: bool = False
     ) -> StreamEditorView:
         """Write this flow's draft to the tracker and answer with the flow as it now reads.
 
-        The three phases are the three statements below, and the `try` is what makes the
-        middle one survivable: a tracker that refuses, times out or writes something else
-        hands the draft back to its owner rather than stranding it.
+        `overwrite` is the answer to a 409 and nothing else: it skips the conflict check, so
+        the push goes ahead over whatever somebody else did in Keitaro. It defaults to
+        `False` because overwriting another person's work is a decision, not a retry.
+
+        The `try` is what makes the middle phase survivable. A tracker that refuses, times
+        out or writes something else hands the draft back to its owner rather than stranding
+        it, and so does a conflict — with `conflict` on the audit row rather than a failure,
+        because nothing went wrong.
         """
         claimed = await self._claim(campaign_id=campaign_id, stream_id=stream_id)
         try:
+            if not overwrite:
+                await self._refuse_a_flow_that_moved(stream_id, claimed)
             written = await self._admin.replace_stream_offers(stream_id, claimed.desired)
+        except DraftConflictError:
+            await self._hand_back(claimed, PushOutcome.CONFLICT)
+            raise
         except UpstreamError as failure:
             await self._hand_back(claimed, outcome_of(failure))
             raise
@@ -171,7 +196,30 @@ class PushDraft:
             await transaction.drafts.change_status(
                 draft.id, was=DraftStatus.OPEN, becomes=DraftStatus.PUSHING
             )
-            return ClaimedPush(draft_id=draft.id, attempt_id=attempt_id, desired=diff.desired)
+            return ClaimedPush(
+                draft_id=draft.id,
+                attempt_id=attempt_id,
+                desired=diff.desired,
+                base_snapshot_hash=draft.base_snapshot_hash,
+            )
+
+    async def _refuse_a_flow_that_moved(
+        self, stream_id: KeitaroStreamId, claimed: ClaimedPush
+    ) -> None:
+        """Read the flow out of Keitaro and stop if it is not the one the draft was opened on.
+
+        One extra round trip per push, and it buys the only thing that can notice somebody
+        editing the flow in the tracker: our own mirror moves when we fetch it, which is a
+        different question and already answered by a warning on the screen.
+
+        `offer_rows` is what makes the two fingerprints comparable — it reads a flow off the
+        wire the way `to_mirror_rows` reads one out of our tables, silenced rows zeroed in
+        both, so a row disabled in Keitaro does not look like a change every time.
+        """
+        held = offer_rows((await self._admin.get_stream(stream_id)).offers)
+        if snapshot_hash(held) == claimed.base_snapshot_hash:
+            return
+        raise DraftConflictError(stream_id, held=desired_state(held), wanted=claimed.desired)
 
     async def _abandon_a_wedged_push(
         self, transaction: Transaction, stream_id: KeitaroStreamId, draft: LiveDraft
