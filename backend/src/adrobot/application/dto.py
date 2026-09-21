@@ -25,6 +25,7 @@ lets the API rename a field without a use case hearing about it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Final
 
 from adrobot.application.ports.persistence import (
@@ -45,6 +46,16 @@ MAX_PAGE_SIZE: Final = 100
 """The largest page this service will build. Bounded at the edge, where a client-supplied
 number can still be answered with a 422 naming the parameter; a use case that clamped
 silently would hand back a shorter page than it was asked for and say nothing about it."""
+
+
+DEFAULT_OFFER_LIMIT: Final = 20
+"""One dropful of the offer combobox, and the default for a caller that says nothing."""
+
+MAX_OFFER_LIMIT: Final = 200
+"""What SHOW ALL OFFERS gets, and the bound on any search. A tracker's catalogue runs to
+thousands; a combobox holding thousands is not a widget anybody uses, and typing two
+characters is how the rest of it is reached. Bounded at the edge, where a client-supplied
+number can still be answered with a 422 naming the parameter."""
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -183,3 +194,16 @@ class EditorView:
 
     campaign: CampaignView
     streams: tuple[StreamEditorView, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class OfferCatalogueSync:
+    """What one pass of the catalogue sync did.
+
+    `synced_at` is `None` when nothing was written, which is the honest answer for a tracker
+    that listed no offers at all — see `SyncOfferCatalogue` for why that is not treated as
+    an empty catalogue.
+    """
+
+    offers: int = 0
+    synced_at: datetime | None = None
