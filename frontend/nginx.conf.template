@@ -1,0 +1,52 @@
+# Rendered by the image's entrypoint: envsubst replaces ${ADROBOT_ACCESS_TOKEN} and nothing
+# else, because NGINX_ENVSUBST_FILTER is set to ^ADROBOT_ in compose. Without that filter
+# nginx's own $host and $scheme would be substituted away.
+
+server {
+    # 8080 and not 80: the image runs as an unprivileged user, which cannot bind 80.
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Set here and nowhere else: an `add_header` inside a location replaces the whole
+    # inherited set, which is why the cache policy below uses `expires` instead.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    # `style-src` needs 'unsafe-inline' because Radix and sonner position themselves with
+    # inline style attributes; scripts need no exception, the build emits no inline script.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # The name must be the compose service: nginx resolves it once at start-up, so a
+    # mismatch is a container that never comes up rather than a failing request.
+    location /api/ {
+        proxy_pass http://api:8000;
+        proxy_http_version 1.1;
+        # The token lives here and never in the bundle. Same-origin from the browser's
+        # side, so there is no CORS and nothing to leak to a page that asks.
+        proxy_set_header Authorization "Bearer ${ADROBOT_ACCESS_TOKEN}";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # `expires` and not `add_header Cache-Control`, so that the headers above survive here:
+    # the file names carry a content hash, so a year is safe.
+    location /assets/ {
+        expires 1y;
+        try_files $uri =404;
+    }
+
+    location / {
+        expires -1;
+        try_files $uri $uri/ /index.html;
+    }
+}
