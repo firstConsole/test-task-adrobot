@@ -2,11 +2,10 @@ import { cn } from 'cn'
 
 import { OfferLabel } from '@/entities/offer'
 import type { StreamRow } from '@/entities/stream'
-import { RowActions } from '@/features/stream-draft'
-import { Skeleton } from '@/shared/ui/skeleton'
+import { RowActions, ShareCell } from '@/features/stream-draft'
 import { TableCell, TableRow } from '@/shared/ui/table'
 
-import { ROW_STYLE, type GroupStatus } from '../model/appearance'
+import { REMOVED_ROW, ROW_STYLE, type GroupStatus } from '../model/appearance'
 
 type OfferRowProps = {
   campaignId: string
@@ -21,26 +20,30 @@ type OfferRowProps = {
 /**
  * One line of a flow's offer table.
  *
- * The share is printed, never computed. Every number on this screen was divided up by
- * `domain/shares.py`; a percentage worked out here would be a second implementation of that
- * arithmetic, and the day the two disagreed the screen would read 34/33/33 while Keitaro held
- * 33/33/33. `null` is an optimistic edit saying it does not know yet — the cell draws a
- * skeleton the width of the number rather than a stale one.
+ * A removed row is drawn, not hidden: greyed, at 0%, saying `(removed)` in words, and
+ * offering `BRING BACK` where the others offer `REMOVE`. It survives a push — the flow is
+ * written with that offer explicitly disabled rather than dropped — which is the behaviour
+ * the reference tool is recognised by.
  */
 export function OfferRow({ campaignId, streamId, streamName, row, status }: OfferRowProps) {
   const offerName = row.offer?.name ?? `#${String(row.offer_id)}`
 
   return (
-    <TableRow aria-label={`${offerName} in ${streamName}`} className={cn(ROW_STYLE[status])}>
+    <TableRow
+      aria-label={`${offerName} in ${streamName}${row.removed ? ', removed' : ''}`}
+      className={cn(ROW_STYLE[status], row.removed ? REMOVED_ROW : null)}
+    >
       <TableCell className="whitespace-normal">
         <OfferLabel offerId={row.offer_id} offer={row.offer} withPreview />
+        {row.removed ? <span className="ml-1.5">(removed)</span> : null}
       </TableCell>
-      <TableCell className="tabular-nums">
-        {row.share === null ? (
-          <Skeleton className="h-4 w-9" aria-label="working out the new share" />
-        ) : (
-          `${String(row.share)}%`
-        )}
+      <TableCell>
+        <ShareCell
+          campaignId={campaignId}
+          streamId={streamId}
+          row={row}
+          offerName={offerName}
+        />
       </TableCell>
       <TableCell />
       <TableCell />

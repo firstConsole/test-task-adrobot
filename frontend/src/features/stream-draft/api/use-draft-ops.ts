@@ -8,7 +8,7 @@ import { queryKeys } from '@/shared/api/query-keys'
 import { problemMessage } from '@/shared/lib/problem-message'
 
 import type { DraftOperation } from '../lib/optimistic'
-import { withOperation, withStream } from '../lib/optimistic'
+import { withOperation, withPin, withStream } from '../lib/optimistic'
 
 /** Scopes the in-flight check to one flow, so a busy Flow 2 does not freeze Flow 1. */
 function draftMutationKey(campaignId: string, streamId: number) {
@@ -152,6 +152,71 @@ export function useDraftPush(campaignId: string, streamId: number) {
     },
     discard: () => {
       discard.mutate()
+    },
+  }
+}
+
+/**
+ * Hold one row where it is, or let it go again.
+ *
+ * **A pin does not make the draft dirty and starts no redivision.** It looks like a bug and
+ * is not: the reference tool behaves the same way, and holding a row is a statement about the
+ * *next* division, not a division of its own. The pin also lives in the mirror rather than in
+ * the draft, which is what lets it survive both `PUSH TO KT` and `CANCEL`.
+ *
+ * This is the one edit the client can apply in full, because it involves no arithmetic: the
+ * row keeps the share it already shows, and no other row moves. So the optimistic write here
+ * blanks nothing and sets no `dirty` flag.
+ */
+export function usePinOffer(campaignId: string, streamId: number) {
+  const queryClient = useQueryClient()
+  const { queryKey } = campaignStreamsQuery(campaignId)
+  const mutationKey = draftMutationKey(campaignId, streamId)
+
+  const toggle = useMutation({
+    mutationKey,
+    mutationFn: ({ offerId, pin }: { offerId: number; pin: boolean }) => {
+      const params = {
+        path: { campaign_id: campaignId, stream_id: streamId, offer_id: offerId },
+      }
+      const path = '/api/v1/campaigns/{campaign_id}/streams/{stream_id}/offers/{offer_id}/pin'
+      // No share on the wire: "hold it where it is" is what the button offers, and the
+      // server reads the row's current share for itself.
+      return pin
+        ? unwrap(api.PUT(path, { params, body: {} }))
+        : unwrap(api.DELETE(path, { params }))
+    },
+
+    onMutate: async ({ offerId, pin }) => {
+      await queryClient.cancelQueries({ queryKey })
+      const previous = queryClient.getQueryData(queryKey)
+
+      if (previous !== undefined) {
+        const flow = previous.streams.find((one) => one.keitaro_stream_id === streamId)
+        if (flow !== undefined) {
+          queryClient.setQueryData(queryKey, withStream(previous, withPin(flow, offerId, pin)))
+        }
+      }
+
+      return { previous }
+    },
+
+    onSuccess: (stream) => {
+      queryClient.setQueryData(queryKey, (view) =>
+        view === undefined ? view : withStream(view, stream),
+      )
+    },
+
+    onError: (error, _variables, context) => {
+      if (context?.previous !== undefined) queryClient.setQueryData(queryKey, context.previous)
+      toast.error(problemMessage(error, 'The pin could not be set.'))
+    },
+  })
+
+  return {
+    pinning: useIsMutating({ mutationKey }) > 0,
+    setPin: (offerId: number, pin: boolean) => {
+      toggle.mutate({ offerId, pin })
     },
   }
 }

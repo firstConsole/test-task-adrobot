@@ -1,5 +1,6 @@
-export { useDraftOps, useDraftPush } from './api/use-draft-ops'
+export { useDraftOps, useDraftPush, usePinOffer } from './api/use-draft-ops'
 export type { DraftOperation } from './lib/optimistic'
-export { withOperation, withStream } from './lib/optimistic'
+export { withOperation, withPin, withStream } from './lib/optimistic'
 export { DraftActions } from './ui/draft-actions'
 export { RowActions } from './ui/row-actions'
+export { ShareCell } from './ui/share-cell'

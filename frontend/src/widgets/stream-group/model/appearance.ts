@@ -25,6 +25,14 @@ export const BAND_STYLE = {
   dirty: 'border-l-2 border-l-amber-400 bg-amber-50 hover:bg-amber-50',
 } as const
 
+/**
+ * A row taken out of the division. It keeps its place, its label and its `(preview)` link —
+ * the reference tool leaves it on screen, and a removal that survives a push is the most
+ * characteristic thing this editor does. Grey is not the only channel: the label says
+ * `(removed)` in words and the action button says `BRING BACK`.
+ */
+export const REMOVED_ROW = 'text-muted-foreground'
+
 export type GroupStatus = keyof typeof ROW_STYLE
 
 export function groupStatus(dirty: boolean): GroupStatus {

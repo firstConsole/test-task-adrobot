@@ -67,6 +67,21 @@ export function withOperation(stream: Stream, operation: DraftOperation): Stream
   return { ...stream, rows: edited(stream.rows, operation).map(unsettled), dirty: true }
 }
 
+/**
+ * The flow with one row held, or let go.
+ *
+ * Nothing else changes — not another row's share, not `dirty`. A pin says where the *next*
+ * division must leave this row; it is not a division, so there is nothing here to guess at.
+ */
+export function withPin(stream: Stream, offerId: number, pin: boolean): Stream {
+  return {
+    ...stream,
+    rows: stream.rows.map((row) =>
+      row.offer_id === offerId ? { ...row, pinned_share: pin ? row.share : null } : row,
+    ),
+  }
+}
+
 /** The screen with one flow swapped out, which is how every answer of an edit lands. */
 export function withStream(view: CampaignStreams, stream: Stream): CampaignStreams {
   return {
