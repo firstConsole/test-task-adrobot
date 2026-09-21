@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from adrobot.application.ports.persistence import CampaignCursor, MirroredCampaign
+from adrobot.domain.campaign import public_link
 from adrobot.domain.ids import OfferId
 from adrobot.domain.values import CampaignName, CountryCode
 
@@ -88,6 +89,23 @@ class CampaignView:
     campaign: MirroredCampaign
     public_url: str | None = None
     setup_failure: str | None = None
+
+    @classmethod
+    def of(cls, campaign: MirroredCampaign, *, setup_failure: str | None = None) -> CampaignView:
+        """Wrap one row, building the public link from the domain the row remembers.
+
+        A constructor rather than four use cases each writing the same conditional, which is
+        four places for "the campaign has no domain" to be answered differently.
+        """
+        return cls(
+            campaign=campaign,
+            public_url=(
+                None
+                if campaign.public_domain is None
+                else public_link(campaign.public_domain, campaign.alias)
+            ),
+            setup_failure=setup_failure,
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -35,17 +35,23 @@ from typing import TYPE_CHECKING, override
 
 from adrobot.application.errors import UpstreamNotFoundError
 from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPort
-from adrobot.application.ports.system import Clock
-from adrobot.domain.campaign import Campaign, Group, ReferenceData, TrackerDomain, TrafficSource
+from adrobot.application.ports.system import AliasFactory, Clock
+from adrobot.domain.campaign import (
+    Campaign,
+    CampaignBlueprint,
+    Group,
+    ReferenceData,
+    TrackerDomain,
+    TrafficSource,
+)
 from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
 from adrobot.domain.stream import Stream, StreamOffer
-from adrobot.domain.values import OfferState
+from adrobot.domain.values import CampaignAlias, OfferState
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from datetime import date
 
-    from adrobot.domain.campaign import CampaignBlueprint
     from adrobot.domain.diff import DesiredOffer
     from adrobot.domain.offer import Offer, OfferStats
     from adrobot.domain.stream import StreamSpec
@@ -79,6 +85,9 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         self.reference = reference
         self.offers = list(offers)
         self.campaigns: dict[KeitaroCampaignId, Campaign] = {}
+        # What it was ASKED to create, which is the only record of the fields the tracker
+        # accepts on a write and declines to give back — `domain_id` above all.
+        self.blueprints: list[CampaignBlueprint] = []
         self.streams: dict[KeitaroStreamId, Stream] = {}
         # What was asked of it, in order, for a scenario that cares how many times.
         self.calls: list[str] = []
@@ -119,6 +128,7 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
     @override
     async def create_campaign(self, blueprint: CampaignBlueprint) -> Campaign:
         self._called("create_campaign")
+        self.blueprints.append(blueprint)
         campaign = Campaign(
             id=KeitaroCampaignId(next(self._campaign_ids)),
             alias=str(blueprint.alias),
@@ -308,3 +318,17 @@ class FakeClock(Clock):
     def advance(self, by: timedelta) -> None:
         """Move the clock forward, which is the whole reason this exists."""
         self.at += by
+
+
+class FakeAliasFactory(AliasFactory):
+    """Aliases a test can predict, numbered in the order they were handed out."""
+
+    def __init__(self, stem: str = "kt-alias") -> None:
+        self.stem = stem
+        self.issued: list[CampaignAlias] = []
+
+    @override
+    def new(self) -> CampaignAlias:
+        alias = CampaignAlias(f"{self.stem}-{len(self.issued) + 1}")
+        self.issued.append(alias)
+        return alias

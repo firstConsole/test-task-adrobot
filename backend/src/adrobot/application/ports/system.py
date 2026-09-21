@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from adrobot.domain.values import CampaignAlias
+
 
 class Clock(ABC):
     """The current moment, as a dependency.
@@ -37,3 +39,23 @@ class Clock(ABC):
         it is, until somebody runs it anywhere else. The tracker's own zone is a separate
         matter and is applied where its naive timestamps are read, not here.
         """
+
+
+class AliasFactory(ABC):
+    """The path segment a campaign's public link ends in, generated rather than chosen.
+
+    Behind a port because it is the one part of a create whose result cannot be predicted,
+    and a scenario test that cannot predict it has to read the alias out of the answer it is
+    checking. The production implementation draws a fixed number of characters from a safe
+    alphabet; filtering something like `token_urlsafe(8)` down to `[a-z0-9]` would be
+    shorter than six characters about a third of the time, which is a 500 on the very first
+    button rather than a rare one.
+
+    Collisions are not handled here and not retried anywhere: the tracker refuses a
+    duplicate alias, that refusal becomes an `UpstreamRejectedError`, and a create is the
+    one call this service never repeats on its own.
+    """
+
+    @abstractmethod
+    def new(self) -> CampaignAlias:
+        """Generate one alias. Returns the validated type, so an unusable one cannot leave."""
