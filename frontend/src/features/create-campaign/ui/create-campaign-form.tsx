@@ -16,6 +16,7 @@ import {
 import { Input } from '@/shared/ui/input'
 
 import { useCreateCampaign } from '../api/use-create-campaign'
+import { readRefusals } from '../model/refusals'
 import type { CreateCampaignValues } from '../model/schema'
 import { EMPTY_CAMPAIGN, createCampaignSchema } from '../model/schema'
 import { GeoSelect } from './geo-select'
@@ -41,12 +42,34 @@ export function CreateCampaignForm() {
   const create = useCreateCampaign()
 
   const submit = (values: CreateCampaignValues) => {
-    create.mutate(values)
+    // The whole form is disabled while a creation is in flight, so this can only be reached
+    // by a second Enter racing the first render. A campaign is not a thing to make twice.
+    if (create.isPending) return
+
+    form.clearErrors('root')
+
+    create.mutate(values, {
+      onError: (error) => {
+        const refusals = readRefusals(error)
+
+        refusals.fields.forEach(({ field, message }, index) => {
+          // The first one takes the focus, which is also where a screen reader is put.
+          form.setError(field, { type: 'server', message }, { shouldFocus: index === 0 })
+        })
+
+        if (refusals.message !== null) {
+          const quoted =
+            refusals.correlationId === null ? '' : ` (${refusals.correlationId})`
+          form.setError('root', { type: 'server', message: `${refusals.message}${quoted}` })
+        }
+      },
+    })
   }
 
   return (
     <form
       noValidate
+      aria-busy={create.isPending || undefined}
       className="max-w-xl"
       onSubmit={(event) => {
         void form.handleSubmit(submit)(event)
@@ -83,6 +106,7 @@ export function CreateCampaignForm() {
                 <FieldLabel htmlFor="campaign-geo">Geo</FieldLabel>
                 <GeoSelect
                   id="campaign-geo"
+                  ref={field.ref}
                   value={field.value}
                   onChange={field.onChange}
                   onBlur={field.onBlur}
@@ -104,6 +128,7 @@ export function CreateCampaignForm() {
                 <FieldLabel htmlFor="campaign-offer">Offer</FieldLabel>
                 <OfferCombobox
                   id="campaign-offer"
+                  ref={field.ref}
                   value={offer}
                   onChange={(picked) => {
                     setOffer(picked)
@@ -120,10 +145,21 @@ export function CreateCampaignForm() {
             )}
           />
 
+          {/* What is left of a refusal once every complaint that named a field is sitting
+              under that field: a 502 from the tracker, a 401, a location this form has no
+              input for. It stays on screen — unlike a toast — because it is the answer to
+              "why is there no campaign", and it carries the id to quote when asking. */}
+          <FieldError errors={[form.formState.errors.root]} />
+
           <Field orientation="horizontal">
             <Button type="submit" size="lg">
               {create.isPending ? 'CREATING…' : 'CREATE'}
             </Button>
+            {create.isPending ? (
+              <span role="status" className="text-muted-foreground text-sm">
+                Writing the campaign and its two flows to Keitaro…
+              </span>
+            ) : null}
           </Field>
         </FieldGroup>
       </FieldSet>

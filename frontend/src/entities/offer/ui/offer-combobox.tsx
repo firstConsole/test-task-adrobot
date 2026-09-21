@@ -1,5 +1,6 @@
 import { cn } from 'cn'
 import { ChevronsUpDownIcon } from 'lucide-react'
+import type { Ref } from 'react'
 import { useState } from 'react'
 
 import { ApiError } from '@/shared/api/client'
@@ -29,6 +30,8 @@ type OfferComboboxProps = {
   invalid?: boolean
   placeholder?: string
   id?: string
+  /** The form library's, so that a server refusal naming this field can put the focus on it. */
+  ref?: Ref<HTMLButtonElement>
   className?: string
 }
 
@@ -50,6 +53,7 @@ export function OfferCombobox({
   invalid = false,
   placeholder = 'Select an offer…',
   id,
+  ref,
   className,
 }: OfferComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -79,6 +83,7 @@ export function OfferCombobox({
       <PopoverTrigger asChild>
         <Button
           id={id}
+          ref={ref}
           type="button"
           variant="outline"
           role="combobox"

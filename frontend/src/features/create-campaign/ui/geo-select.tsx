@@ -1,5 +1,6 @@
 import { cn } from 'cn'
 import { ChevronsUpDownIcon } from 'lucide-react'
+import type { Ref } from 'react'
 import { useState } from 'react'
 
 import type { Country } from '@/shared/lib/countries'
@@ -23,7 +24,8 @@ type GeoSelectProps = {
   disabled?: boolean
   invalid?: boolean
   id?: string
-  'aria-describedby'?: string
+  /** The form library's, so that a server refusal naming this field can put the focus on it. */
+  ref?: Ref<HTMLButtonElement>
 }
 
 /**
@@ -46,7 +48,7 @@ export function GeoSelect({
   disabled = false,
   invalid = false,
   id,
-  'aria-describedby': describedBy,
+  ref,
 }: GeoSelectProps) {
   const [open, setOpen] = useState(false)
   const [term, setTerm] = useState('')
@@ -70,12 +72,12 @@ export function GeoSelect({
       <PopoverTrigger asChild>
         <Button
           id={id}
+          ref={ref}
           type="button"
           variant="outline"
           role="combobox"
           aria-expanded={open}
           aria-invalid={invalid || undefined}
-          aria-describedby={describedBy}
           disabled={disabled}
           className="w-full justify-between overflow-hidden font-normal"
         >

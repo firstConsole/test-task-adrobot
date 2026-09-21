@@ -3,7 +3,6 @@ import { toast } from 'sonner'
 
 import { api, unwrap } from '@/shared/api/client'
 import { queryKeys } from '@/shared/api/query-keys'
-import { problemMessage } from '@/shared/lib/problem-message'
 
 import type { CreateCampaignValues } from '../model/schema'
 
@@ -25,8 +24,8 @@ export function useCreateCampaign() {
       await queryClient.invalidateQueries({ queryKey: queryKeys.campaigns.all })
       toast.success(`${campaign.name} is in Keitaro.`)
     },
-    onError: (error) => {
-      toast.error(problemMessage(error, 'The campaign could not be created.'))
-    },
+    // No `onError` here, and that is the point: a refused creation belongs under the field
+    // it was refused over, and only the form knows which input that is. A toast on top of
+    // three red fields would be the same news told twice.
   })
 }
