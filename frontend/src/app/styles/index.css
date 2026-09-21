@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* The variants (`data-open`, `data-closed`) and utilities the vendored shadcn
+   components are written against, and the animations Radix overlays use. Both are
+   resolved by Tailwind at build time and reach no bundle. */
+@import "shadcn/tailwind.css";
+@import "tw-animate-css";
 
 /* `@theme inline` and not `@theme`: every token below points at another custom property,
    and plain `@theme` would freeze today's value into the utility class. */
