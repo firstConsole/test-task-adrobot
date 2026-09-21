@@ -60,7 +60,7 @@ export function OfferCombobox({
   onBlur,
   disabled = false,
   invalid = false,
-  placeholder = 'Select an offer…',
+  placeholder = 'Выберите оффер…',
   id,
   ref,
   empty,
@@ -112,18 +112,18 @@ export function OfferCombobox({
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
-        <Command shouldFilter={false} label="Offer catalogue">
-          <CommandInput value={term} onValueChange={setTerm} placeholder="Search by id or name…" />
+        <Command shouldFilter={false} label="Каталог офферов">
+          <CommandInput value={term} onValueChange={setTerm} placeholder="Поиск по id или имени…" />
           <CommandList>
             {search.isError ? (
               <p role="status" className="text-destructive px-3 py-6 text-center text-sm">
-                {search.error instanceof ApiError ? search.error.message : 'Search failed'}
+                {search.error instanceof ApiError ? search.error.message : 'Поиск не удался'}
               </p>
             ) : (
               <>
                 {searching ? (
                   <p role="status" className="text-muted-foreground py-6 text-center text-sm">
-                    Searching…
+                    Ищу…
                   </p>
                 ) : null}
 
@@ -135,8 +135,8 @@ export function OfferCombobox({
                         offer. One of them is fixed by pressing a button. */}
                     <span className="block">
                       {settled === ''
-                        ? 'The catalogue is empty — nothing has been read from Keitaro yet'
-                        : 'No results found'}
+                        ? 'Каталог пуст — из Keitaro ещё ничего не читали'
+                        : 'Ничего не нашлось'}
                     </span>
                     {empty === undefined ? null : <span className="mt-3 block">{empty}</span>}
                   </CommandEmpty>

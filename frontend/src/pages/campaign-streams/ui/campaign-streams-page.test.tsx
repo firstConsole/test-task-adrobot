@@ -73,24 +73,24 @@ describe('an edit that the server refuses', () => {
     })
 
     renderEditor()
-    await screen.findByRole('row', { name: /Miaflow 0008 in Flow 2$/ })
+    await screen.findByRole('row', { name: /Miaflow 0008 в потоке Flow 2$/ })
 
-    await user.click(screen.getByRole('button', { name: /remove Miaflow 0008/i }))
+    await user.click(screen.getByRole('button', { name: /убрать Miaflow 0008/i }))
 
     // Optimism in the structure: the row is struck out and takes nothing, at once.
-    const struck = await screen.findByRole('row', { name: /Miaflow 0008 in Flow 2, removed/ })
-    expect(within(struck).getByText('(removed)')).toBeInTheDocument()
+    const struck = await screen.findByRole('row', { name: /Miaflow 0008 в потоке Flow 2, убран/ })
+    expect(within(struck).getByText('(убран)')).toBeInTheDocument()
     expect(within(struck).getByText('0%')).toBeInTheDocument()
 
     // Pessimism in the numbers: the free row's new share is the server's to work out, so it
     // is drawn as a skeleton rather than guessed at here.
-    expect(screen.getByLabelText(/working out the share of Miaflow 0009/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/считаю долю оффера Miaflow 0009/i)).toBeInTheDocument()
     expect(screen.queryByText('62%')).not.toBeInTheDocument()
 
     release()
 
     await waitFor(() => {
-      expect(screen.queryByText('(removed)')).not.toBeInTheDocument()
+      expect(screen.queryByText('(убран)')).not.toBeInTheDocument()
     })
     expect(screen.getByText('62%')).toBeInTheDocument()
     expect(await screen.findByText('Keitaro did not answer.')).toBeInTheDocument()
@@ -144,10 +144,10 @@ describe('a push onto a flow that moved', () => {
     })
 
     renderEditor()
-    await user.click(await screen.findByRole('button', { name: /push flow 2 to keitaro/i }))
+    await user.click(await screen.findByRole('button', { name: /отправить flow 2 в keitaro/i }))
 
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/Flow 2 has moved in Keitaro/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/Flow 2 уехал в Keitaro/i)).toBeInTheDocument()
 
     // Both readings, lined up by offer, so there is something to decide between.
     const row = within(dialog).getByRole('row', { name: /3749/ })
@@ -190,7 +190,7 @@ describe('a campaign whose flows the tracker never took', () => {
     await waitFor(() => {
       expect(calls.some((call) => call.path.endsWith('/repair'))).toBe(true)
     })
-    expect(await screen.findByText('Flow 1 and Flow 2 are both in Keitaro now.')).toBeInTheDocument()
+    expect(await screen.findByText('Flow 1 и Flow 2 теперь оба в Keitaro.')).toBeInTheDocument()
   })
 
   it('does not offer the button on a campaign it would be refused for', async () => {
@@ -200,7 +200,7 @@ describe('a campaign whose flows the tracker never took', () => {
 
     renderEditor()
 
-    expect(await screen.findByText(/It was built somewhere else/)).toBeInTheDocument()
+    expect(await screen.findByText(/построена не здесь/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'FINISH SETUP' })).toBeNull()
   })
 })

@@ -9,7 +9,7 @@ type RowActionsProps = {
   campaignId: string
   streamId: number
   row: StreamRow
-  /** For the button's accessible name — "REMOVE" alone is four identical buttons. */
+  /** For the button's accessible name — `REMOVE` alone is four identical buttons. */
   offerName: string
 }
 
@@ -29,7 +29,7 @@ export function RowActions({ campaignId, streamId, row, offerName }: RowActionsP
       variant="outline"
       size="sm"
       disabled={draft.staging}
-      aria-label={`Bring ${offerName} back`}
+      aria-label={`Вернуть ${offerName}`}
       onClick={() => {
         draft.bringBack(row.offer_id)
       }}
@@ -43,7 +43,7 @@ export function RowActions({ campaignId, streamId, row, offerName }: RowActionsP
       variant="outline"
       size="sm"
       disabled={draft.staging}
-      aria-label={`Remove ${offerName}`}
+      aria-label={`Убрать ${offerName}`}
       onClick={() => {
         draft.remove(row.offer_id)
       }}

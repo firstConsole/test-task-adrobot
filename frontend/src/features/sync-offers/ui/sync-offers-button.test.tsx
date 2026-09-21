@@ -39,7 +39,7 @@ describe('fetching the offer catalogue', () => {
       expect(calls.at(-1)?.path).toBe('/api/v1/offers/sync')
     })
     expect(calls.at(-1)?.method).toBe('POST')
-    expect(await screen.findByText('3 offers read from Keitaro.')).toBeInTheDocument()
+    expect(await screen.findByText('Из Keitaro прочитано офферов: 3.')).toBeInTheDocument()
   })
 
   it('does not report an emptied catalogue when the tracker listed nothing', async () => {
@@ -50,7 +50,7 @@ describe('fetching the offer catalogue', () => {
     await user.click(screen.getByRole('button', { name: /fetch offers from kt/i }))
 
     expect(
-      await screen.findByText('Keitaro listed no offers, so the catalogue was left as it was.'),
+      await screen.findByText('Keitaro не отдал ни одного оффера — каталог оставлен как был.'),
     ).toBeInTheDocument()
   })
 
@@ -71,7 +71,7 @@ describe('fetching the offer catalogue', () => {
     await user.click(screen.getByRole('combobox'))
 
     // Not "No results found": nothing has been read, and the two are not the same problem.
-    expect(await screen.findByText(/the catalogue is empty/i)).toBeInTheDocument()
+    expect(await screen.findByText(/каталог пуст/i)).toBeInTheDocument()
 
     await user.click(await screen.findByRole('button', { name: /fetch offers from kt/i }))
 

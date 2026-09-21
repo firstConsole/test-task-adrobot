@@ -28,13 +28,13 @@ export function useSyncOffers() {
       // `synced_at` is null when the tracker listed nothing, and the copy was left alone —
       // reporting "0 offers" there would read as "the catalogue was emptied".
       if (catalogue.synced_at === null) {
-        toast.warning('Keitaro listed no offers, so the catalogue was left as it was.')
+        toast.warning('Keitaro не отдал ни одного оффера — каталог оставлен как был.')
         return
       }
-      toast.success(`${String(catalogue.offers)} offers read from Keitaro.`)
+      toast.success(`Из Keitaro прочитано офферов: ${String(catalogue.offers)}.`)
     },
     onError: (error) => {
-      toast.error(problemMessage(error, 'The offer catalogue could not be read.'))
+      toast.error(problemMessage(error, 'Каталог офферов не удалось прочитать.'))
     },
   })
 

@@ -73,7 +73,7 @@ export function useDraftOps(campaignId: string, streamId: number) {
 
     onError: (error, _operation, context) => {
       if (context?.previous !== undefined) queryClient.setQueryData(queryKey, context.previous)
-      toast.error(problemMessage(error, 'The edit could not be staged.'))
+      toast.error(problemMessage(error, 'Правку не удалось отложить в черновик.'))
     },
   })
 
@@ -134,7 +134,7 @@ export function useDraftPush(campaignId: string, streamId: number) {
       setConflict(null)
       land(stream)
       void queryClient.invalidateQueries({ queryKey: queryKeys.campaigns.stats(campaignId) })
-      toast.success(`Written to Keitaro: ${activeShares(stream)}`)
+      toast.success(`Записано в Keitaro: ${activeShares(stream)}`)
     },
     onError: (error) => {
       const clash = error instanceof ApiError ? (error.problem.conflict ?? null) : null
@@ -142,7 +142,7 @@ export function useDraftPush(campaignId: string, streamId: number) {
         setConflict(clash)
         return
       }
-      toast.error(problemMessage(error, 'Keitaro did not take the change.'))
+      toast.error(problemMessage(error, 'Keitaro не принял изменение.'))
     },
   })
 
@@ -156,7 +156,7 @@ export function useDraftPush(campaignId: string, streamId: number) {
       ),
     onSuccess: land,
     onError: (error) => {
-      toast.error(problemMessage(error, 'The draft could not be thrown away.'))
+      toast.error(problemMessage(error, 'Черновик не удалось выбросить.'))
     },
   })
 
@@ -233,7 +233,7 @@ export function usePinOffer(campaignId: string, streamId: number) {
 
     onError: (error, _variables, context) => {
       if (context?.previous !== undefined) queryClient.setQueryData(queryKey, context.previous)
-      toast.error(problemMessage(error, 'The pin could not be set.'))
+      toast.error(problemMessage(error, 'Закрепить строку не удалось.'))
     },
   })
 

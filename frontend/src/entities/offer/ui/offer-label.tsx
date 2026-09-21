@@ -37,7 +37,7 @@ export function OfferLabel({ offerId, offer, withPreview = false, className }: O
       <span className="text-muted-foreground tabular-nums">#{String(offerId)}</span>
 
       {offer === null || offer === undefined ? (
-        <span className="text-muted-foreground italic">(not in catalogue)</span>
+        <span className="text-muted-foreground italic">(нет в каталоге)</span>
       ) : (
         <>
           <span>{offer.name}</span>
@@ -55,7 +55,7 @@ export function OfferLabel({ offerId, offer, withPreview = false, className }: O
                 event.stopPropagation()
               }}
             >
-              (preview)
+              (превью)
             </a>
           ) : null}
         </>

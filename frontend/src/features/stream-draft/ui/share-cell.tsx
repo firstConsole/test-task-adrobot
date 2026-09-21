@@ -27,7 +27,7 @@ export function ShareCell({ campaignId, streamId, row, offerName }: ShareCellPro
   const pinned = row.pinned_share !== null && row.pinned_share !== undefined
 
   if (row.share === null) {
-    return <Skeleton className="h-4 w-9" aria-label={`working out the share of ${offerName}`} />
+    return <Skeleton className="h-4 w-9" aria-label={`считаю долю оффера ${offerName}`} />
   }
 
   return (
@@ -39,9 +39,9 @@ export function ShareCell({ campaignId, streamId, row, offerName }: ShareCellPro
         size="icon-xs"
         aria-pressed={pinned}
         disabled={pin.pinning}
-        title={pinned ? 'Let this row move again' : 'Hold this row at this share'}
+        title={pinned ? 'Отпустить строку' : 'Держать строку на этой доле'}
         aria-label={
-          pinned ? `Unpin ${offerName}` : `Pin ${offerName} at ${String(row.share)} percent`
+          pinned ? `Открепить ${offerName}` : `Закрепить ${offerName} на ${String(row.share)} процентах`
         }
         onClick={() => {
           pin.setPin(row.offer_id, !pinned)

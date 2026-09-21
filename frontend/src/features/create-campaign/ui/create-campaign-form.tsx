@@ -109,7 +109,7 @@ export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = 
             name="name"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="campaign-name">Name</FieldLabel>
+                <FieldLabel htmlFor="campaign-name">Имя</FieldLabel>
                 <Input
                   {...field}
                   id="campaign-name"
@@ -117,7 +117,7 @@ export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = 
                   placeholder="Summer MX — Oxys"
                   aria-invalid={fieldState.invalid || undefined}
                 />
-                <FieldDescription>What the campaign is called in the tracker.</FieldDescription>
+                <FieldDescription>Как кампания называется в трекере.</FieldDescription>
                 <FieldError errors={[fieldState.error]} />
               </Field>
             )}
@@ -128,7 +128,7 @@ export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = 
             name="country"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="campaign-geo">Geo</FieldLabel>
+                <FieldLabel htmlFor="campaign-geo">Гео</FieldLabel>
                 <GeoSelect
                   id="campaign-geo"
                   ref={field.ref}
@@ -138,7 +138,7 @@ export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = 
                   invalid={fieldState.invalid}
                 />
                 <FieldDescription>
-                  Flow 1 catches this country and sends it to google.com.
+                  Flow 1 ловит эту страну и уводит её на google.com.
                 </FieldDescription>
                 <FieldError errors={[fieldState.error]} />
               </Field>
@@ -150,7 +150,7 @@ export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = 
             name="offer_id"
             render={({ field, fieldState }) => (
               <Field data-invalid={fieldState.invalid || undefined}>
-                <FieldLabel htmlFor="campaign-offer">Offer</FieldLabel>
+                <FieldLabel htmlFor="campaign-offer">Оффер</FieldLabel>
                 <OfferCombobox
                   id="campaign-offer"
                   ref={field.ref}
@@ -164,7 +164,7 @@ export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = 
                   empty={offerEmpty}
                 />
                 <FieldDescription>
-                  Flow 2 rotates the offers and starts with this one at 100%.
+                  Flow 2 крутит офферы и начинает с этого, на 100%.
                 </FieldDescription>
                 <FieldError errors={[fieldState.error]} />
 
@@ -196,7 +196,7 @@ export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = 
             </Button>
             {create.isPending ? (
               <span role="status" className="text-muted-foreground text-sm">
-                Writing the campaign and its two flows to Keitaro…
+                Пишу кампанию и два её потока в Keitaro…
               </span>
             ) : null}
           </Field>

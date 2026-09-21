@@ -61,9 +61,9 @@ describe('the campaign list', () => {
     // Still there: a page is more of this list, not a different one.
     expect(screen.getByRole('link', { name: 'Summer MX' })).toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('Search campaigns'), 'nothing')
+    await user.type(screen.getByLabelText('Поиск кампаний'), 'nothing')
 
-    expect(await screen.findByText(/No campaign here matches/)).toBeInTheDocument()
+    expect(await screen.findByText(/здесь ничего нет/)).toBeInTheDocument()
     expect(calls.at(-1)?.search.get('q')).toBe('nothing')
   })
 })
@@ -81,7 +81,7 @@ describe('opening a campaign the tracker already has', () => {
         : { body: { campaigns: [] } },
     )
 
-    await user.type(await screen.findByLabelText('Open one from Keitaro'), '93212')
+    await user.type(await screen.findByLabelText('Открыть из Keitaro'), '93212')
     await user.click(screen.getByRole('button', { name: 'IMPORT' }))
 
     expect(await screen.findByText(`editor of ${CAMPAIGN.id}`)).toBeInTheDocument()
@@ -95,7 +95,7 @@ describe('opening a campaign the tracker already has', () => {
         : { body: { campaigns: [] } },
     )
 
-    await user.type(await screen.findByLabelText('Open one from Keitaro'), '1')
+    await user.type(await screen.findByLabelText('Открыть из Keitaro'), '1')
     await user.click(screen.getByRole('button', { name: 'IMPORT' }))
 
     expect(await screen.findByText(/Keitaro has no campaign 1\./)).toBeInTheDocument()
@@ -105,10 +105,10 @@ describe('opening a campaign the tracker already has', () => {
     const user = userEvent.setup()
     const calls = render(() => ({ body: { campaigns: [] } }))
 
-    await user.type(await screen.findByLabelText('Open one from Keitaro'), 'abc')
+    await user.type(await screen.findByLabelText('Открыть из Keitaro'), 'abc')
     await user.click(screen.getByRole('button', { name: 'IMPORT' }))
 
-    expect(await screen.findByText(/A campaign id is the number/)).toBeInTheDocument()
+    expect(await screen.findByText(/Id кампании/)).toBeInTheDocument()
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0)
   })
 })

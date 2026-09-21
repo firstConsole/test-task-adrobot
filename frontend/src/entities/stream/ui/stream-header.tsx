@@ -10,6 +10,8 @@ import type { Stream, StreamFilter } from '../model/types'
  * that a heading a reviewer recognises is also a heading that is true.
  */
 function describeFilters(filters: readonly StreamFilter[]): string {
+  // `None` and not «нет»: this is the tracker's vocabulary, printed the way the reference
+  // tool prints it, and the rest of the line is the filter's own words too.
   if (filters.length === 0) return 'None'
 
   return filters
@@ -41,18 +43,18 @@ export function StreamHeader({ stream, clicksToday }: StreamHeaderProps) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
       <span className="text-sm font-semibold">
-        Stream: {stream.name}
+        Поток: {stream.name}
         {position === null ? null : ` (#${String(position)})`}
       </span>
       <span className="text-muted-foreground text-xs font-normal">
-        filter by {describeFilters(stream.filters)}, stream_id {String(stream.keitaro_stream_id)}
+        фильтр {describeFilters(stream.filters)}, stream_id {String(stream.keitaro_stream_id)}
         {clicksToday === null || clicksToday === undefined
           ? null
-          : `, clicks today: ${String(clicksToday)}`}
+          : `, кликов сегодня: ${String(clicksToday)}`}
       </span>
       {stream.absent ? (
-        <Badge variant="destructive" title="Keitaro no longer lists this flow">
-          missing in Keitaro
+        <Badge variant="destructive" title="Keitaro больше не отдаёт этот поток">
+          нет в Keitaro
         </Badge>
       ) : null}
     </div>

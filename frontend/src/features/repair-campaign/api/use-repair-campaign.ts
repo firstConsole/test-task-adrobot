@@ -30,18 +30,18 @@ export function useRepairCampaign(campaignId: string) {
       await queryClient.invalidateQueries({ queryKey: queryKeys.campaigns.one(campaignId) })
 
       if (campaign.setup_status === 'ready') {
-        toast.success('Flow 1 and Flow 2 are both in Keitaro now.')
+        toast.success('Flow 1 и Flow 2 теперь оба в Keitaro.')
         return
       }
 
       // Pressed, and the tracker refused again. Saying so is the point: the alternative is
       // a button that reports success and a banner that does not go away.
-      toast.warning('Keitaro would still not take the whole setup.', {
-        description: campaign.setup_failure ?? 'Try again, or build the missing flow by hand.',
+      toast.warning('Keitaro снова не принял настройку целиком.', {
+        description: campaign.setup_failure ?? 'Попробуйте ещё раз или создайте недостающий поток руками.',
       })
     },
     onError: (error) => {
-      toast.error(problemMessage(error, 'The setup could not be finished.'))
+      toast.error(problemMessage(error, 'Настройку не удалось достроить.'))
     },
   })
 

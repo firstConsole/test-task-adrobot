@@ -39,7 +39,7 @@ export function useCampaignNumbers(campaignId: string): CampaignNumbers | null {
 
   return useMemo(() => {
     if (data !== undefined) return campaignNumbers(data)
-    if (error !== null) return unreadableNumbers(problemMessage(error, 'The report could not be read.'))
+    if (error !== null) return unreadableNumbers(problemMessage(error, 'Отчёт не удалось прочитать.'))
     return null
   }, [data, error])
 }

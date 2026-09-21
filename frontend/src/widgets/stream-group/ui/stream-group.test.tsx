@@ -26,8 +26,8 @@ describe('a flow with staged edits', () => {
     const { rerender } = renderWithQuery(
       inTable(<StreamGroup campaignId={CAMPAIGN} stream={dirty} numbers={NO_NUMBERS} />),
     )
-    expect(screen.getByRole('button', { name: /push flow 2 to keitaro/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /throw away the staged edits/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /отправить flow 2 в keitaro/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /выбросить черновик/i })).toBeInTheDocument()
 
     rerender(
       inTable(
@@ -38,8 +38,8 @@ describe('a flow with staged edits', () => {
         />,
       ),
     )
-    expect(screen.queryByRole('button', { name: /push flow 2 to keitaro/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /throw away the staged edits/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /отправить flow 2 в keitaro/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /выбросить черновик/i })).not.toBeInTheDocument()
   })
 
   it('will not let a blocked push be pressed, and says why in the server’s own words', () => {
@@ -53,7 +53,7 @@ describe('a flow with staged edits', () => {
 
     renderWithQuery(inTable(<StreamGroup campaignId={CAMPAIGN} stream={blocked} numbers={NO_NUMBERS} />))
 
-    expect(screen.getByRole('button', { name: /push flow 2 to keitaro/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /отправить flow 2 в keitaro/i })).toBeDisabled()
     expect(screen.getByText(/traffic would go nowhere/i)).toBeInTheDocument()
   })
 })
@@ -72,15 +72,15 @@ describe('a removed row', () => {
       ),
     )
 
-    const row = screen.getByRole('row', { name: /FitoMishki in Flow 2, removed/i })
-    expect(within(row).getByText('(removed)')).toBeInTheDocument()
+    const row = screen.getByRole('row', { name: /FitoMishki в потоке Flow 2, убран/i })
+    expect(within(row).getByText('(убран)')).toBeInTheDocument()
     expect(within(row).getByText('0%')).toBeInTheDocument()
-    expect(within(row).getByRole('button', { name: /bring FitoMishki back/i })).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: /вернуть FitoMishki/i })).toBeInTheDocument()
     expect(within(row).queryByRole('button', { name: /^remove /i })).not.toBeInTheDocument()
 
     // And the rows that are still in the division keep theirs.
-    const kept = screen.getByRole('row', { name: /Miaflow 0009 in Flow 2$/i })
-    expect(within(kept).getByRole('button', { name: /remove Miaflow 0009/i })).toBeInTheDocument()
+    const kept = screen.getByRole('row', { name: /Miaflow 0009 в потоке Flow 2$/i })
+    expect(within(kept).getByRole('button', { name: /убрать Miaflow 0009/i })).toBeInTheDocument()
   })
 })
 
@@ -122,7 +122,7 @@ describe('the Stats column', () => {
     // The numbers are on screen, read out of the map the page built once.
     expect(screen.getByText('4')).toBeInTheDocument()
     expect(screen.getByText(/1 cv/)).toBeInTheDocument()
-    expect(screen.getByText(/clicks today: 7/)).toBeInTheDocument()
+    expect(screen.getByText(/кликов сегодня: 7/)).toBeInTheDocument()
     // An offer the report did not mention gets an empty cell, never an invented zero.
     expect(screen.queryByText('0', { selector: 'span' })).not.toBeInTheDocument()
     expect(calls).toHaveLength(0)

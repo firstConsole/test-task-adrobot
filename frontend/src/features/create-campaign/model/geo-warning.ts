@@ -28,8 +28,8 @@ export function geoWarning(country: string, offer: Offer | null): string | null 
   const rest = geos.filter((code) => code !== country)
 
   if (rest.length === 0) {
-    return `${offer.name} is set up for ${country} — the one country this campaign never sends here. Flow 1 catches ${country} first and redirects it to google.com, so the offer would sit on 100% of nothing.`
+    return `${offer.name} настроен на ${country} — единственную страну, которую эта кампания сюда не пускает. Flow 1 ловит ${country} первым и уводит на google.com, так что оффер будет держать 100% ничего.`
   }
 
-  return `${offer.name} covers ${geos.join(', ')}, and Flow 1 catches ${country} first and redirects it to google.com. Only ${rest.join(', ')} would reach the offer.`
+  return `${offer.name} закрывает ${geos.join(', ')}, а Flow 1 ловит ${country} первым и уводит на google.com. До оффера дойдут только ${rest.join(', ')}.`
 }

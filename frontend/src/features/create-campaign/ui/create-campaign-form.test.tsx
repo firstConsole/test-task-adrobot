@@ -49,11 +49,11 @@ function render(answer: (call: ApiCall) => Answer): ApiCall[] {
 
 async function fillIn(user: ReturnType<typeof userEvent.setup>) {
   // Spaces around the name on purpose: the schema trims, and the body below proves it.
-  await user.type(screen.getByLabelText('Name'), '  Summer MX  ')
-  await user.click(screen.getByLabelText('Geo'))
-  await user.type(screen.getByPlaceholderText('Search by code or name…'), 'mexi')
+  await user.type(screen.getByLabelText('Имя'), '  Summer MX  ')
+  await user.click(screen.getByLabelText('Гео'))
+  await user.type(screen.getByPlaceholderText('Поиск по коду или названию…'), 'mexi')
   await user.click(await screen.findByText('Mexico'))
-  await user.click(screen.getByLabelText('Offer'))
+  await user.click(screen.getByLabelText('Оффер'))
   await user.click(await screen.findByText('Oxys'))
 }
 
@@ -101,7 +101,7 @@ describe('the campaign form', () => {
 
     expect(await screen.findByText(`editor of ${CAMPAIGN.id}`)).toBeInTheDocument()
     expect(
-      await screen.findByText('Summer MX was created, but its flows are not finished.'),
+      await screen.findByText('Summer MX создана, но её потоки не достроены.'),
     ).toBeInTheDocument()
     expect(
       screen.getByText('Keitaro refused Flow 2: offer 11112 is archived.'),
@@ -130,9 +130,9 @@ describe('the campaign form', () => {
     expect(screen.getByText('Keitaro: offer 11112 is archived')).toBeInTheDocument()
     // A location this form has no input for is still said out loud, with the id to quote.
     expect(screen.getByText('query.weird: nobody asked for this (corr-1)')).toBeInTheDocument()
-    expect(screen.getByLabelText('Offer')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('Оффер')).toHaveAttribute('aria-invalid', 'true')
     await waitFor(() => {
-      expect(screen.getByLabelText('Name')).toHaveFocus()
+      expect(screen.getByLabelText('Имя')).toHaveFocus()
     })
     // Nothing was created, so nothing was opened.
     expect(screen.queryByText(new RegExp(campaignStreamsPath(CAMPAIGN.id)))).toBeNull()
@@ -147,13 +147,13 @@ describe('the campaign form', () => {
       ROUTES.campaignCreate,
     )
 
-    await user.click(screen.getByLabelText('Geo'))
-    await user.type(screen.getByPlaceholderText('Search by code or name…'), 'mexi')
+    await user.click(screen.getByLabelText('Гео'))
+    await user.type(screen.getByPlaceholderText('Поиск по коду или названию…'), 'mexi')
     await user.click(await screen.findByText('Mexico'))
-    await user.click(screen.getByLabelText('Offer'))
+    await user.click(screen.getByLabelText('Оффер'))
     await user.click(await screen.findByText('Oxys'))
 
-    expect(await screen.findByText(/sit on 100% of nothing/)).toBeInTheDocument()
+    expect(await screen.findByText(/100% ничего/)).toBeInTheDocument()
     // A warning, not a refusal: the button stays live.
     expect(screen.getByRole('button', { name: 'CREATE' })).toBeEnabled()
   })

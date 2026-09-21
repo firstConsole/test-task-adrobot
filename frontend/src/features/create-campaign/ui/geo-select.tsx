@@ -82,7 +82,7 @@ export function GeoSelect({
           className="w-full justify-between overflow-hidden font-normal"
         >
           {picked === null ? (
-            <span className="text-muted-foreground">Select a country…</span>
+            <span className="text-muted-foreground">Выберите страну…</span>
           ) : (
             <CountryLabel country={picked} />
           )}
@@ -92,9 +92,9 @@ export function GeoSelect({
 
       <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
         <Command shouldFilter={false} label="Countries">
-          <CommandInput value={term} onValueChange={setTerm} placeholder="Search by code or name…" />
+          <CommandInput value={term} onValueChange={setTerm} placeholder="Поиск по коду или названию…" />
           <CommandList>
-            {found.length === 0 ? <CommandEmpty>No results found</CommandEmpty> : null}
+            {found.length === 0 ? <CommandEmpty>Ничего не нашлось</CommandEmpty> : null}
             {found.length > 0 ? (
               <CommandGroup>
                 {found.map((country) => (

@@ -43,7 +43,7 @@ export function AddOfferRow({ campaignId, streamId, streamName, status }: AddOff
           <Button
             type="button"
             disabled={offer === null || draft.staging}
-            aria-label={`Add an offer to ${streamName}`}
+            aria-label={`Добавить оффер в ${streamName}`}
             onClick={() => {
               if (offer === null) return
               draft.add(offer)
