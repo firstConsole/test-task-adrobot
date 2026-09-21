@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
 import type { ReactElement, ReactNode } from 'react'
+import type { RouteObject } from 'react-router'
 import { RouterProvider, createMemoryRouter } from 'react-router'
 
 import { Toaster } from '@/shared/ui/sonner'
@@ -45,7 +46,18 @@ export function inTableBody(children: ReactNode) {
  * it, so a component handed its data as a prop could never show the rollback.
  */
 export function renderAtRoute(element: ReactElement, path: string, at: string) {
-  const router = createMemoryRouter([{ path, element }], { initialEntries: [at] })
+  return renderAtRoutes([{ path, element }], at)
+}
+
+/**
+ * The same, with somewhere to go.
+ *
+ * A screen that navigates on success can only be held to it if the destination exists, so
+ * these tests mount the page under test beside a one-line stub of wherever it sends people.
+ * What is asserted is that the router arrived, not what it drew when it got there.
+ */
+export function renderAtRoutes(routes: RouteObject[], at: string) {
+  const router = createMemoryRouter(routes, { initialEntries: [at] })
 
   return renderWithQuery(
     <>

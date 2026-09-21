@@ -1,5 +1,6 @@
 import { cn } from 'cn'
 import { ChevronsUpDownIcon } from 'lucide-react'
+import type { Ref } from 'react'
 import { useState } from 'react'
 
 import { ApiError } from '@/shared/api/client'
@@ -24,9 +25,13 @@ const DEBOUNCE_MS = 250
 type OfferComboboxProps = {
   value: Offer | null
   onChange: (offer: Offer) => void
+  onBlur?: () => void
   disabled?: boolean
+  invalid?: boolean
   placeholder?: string
   id?: string
+  /** The form library's, so that a server refusal naming this field can put the focus on it. */
+  ref?: Ref<HTMLButtonElement>
   className?: string
 }
 
@@ -43,9 +48,12 @@ type OfferComboboxProps = {
 export function OfferCombobox({
   value,
   onChange,
+  onBlur,
   disabled = false,
+  invalid = false,
   placeholder = 'Select an offer…',
   id,
+  ref,
   className,
 }: OfferComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -64,16 +72,23 @@ export function OfferCombobox({
       open={open}
       onOpenChange={(next) => {
         setOpen(next)
-        if (!next) setTerm('')
+        if (!next) {
+          setTerm('')
+          // Closing is when this field stops being touched, which is what a form validating
+          // on blur waits for — the trigger's own blur fires on the way in, not on the way out.
+          onBlur?.()
+        }
       }}
     >
       <PopoverTrigger asChild>
         <Button
           id={id}
+          ref={ref}
           type="button"
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-invalid={invalid || undefined}
           disabled={disabled}
           className={cn('w-full justify-between overflow-hidden font-normal', className)}
         >

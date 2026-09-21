@@ -14,7 +14,7 @@ POETRY  ?= poetry
 RUN     := $(POETRY) run
 
 .DEFAULT_GOAL := help
-.PHONY: help install hooks up down migrate revision openapi test fast cov lint typecheck imports probe
+.PHONY: help install hooks up down migrate revision openapi countries test fast cov lint typecheck imports probe
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -86,6 +86,11 @@ imports: ## Check the layer boundaries
 # direction (`make openapi && git diff --exit-code`, then `npm run api:types:check`).
 openapi: ## Write docs/adrobot-openapi.json from the routers
 	cd $(BACKEND) && $(RUN) python scripts/dump_openapi.py
+
+# The other generated file, and the same deal: the geo select is built from ISO 3166-1, and
+# the list it is built from is the one CountryCode validates against. CI re-runs this too.
+countries: ## Write the frontend's country list from domain/geo.py
+	cd $(BACKEND) && $(RUN) python scripts/dump_countries.py
 
 # --- the tracker ----------------------------------------------------------------------
 
