@@ -1,7 +1,7 @@
 import { cn } from 'cn'
 
 import { StreamHeader, type Stream } from '@/entities/stream'
-import { DraftActions } from '@/features/stream-draft'
+import { DiffSummary, DraftActions } from '@/features/stream-draft'
 import { TableBody, TableCell, TableHead, TableRow } from '@/shared/ui/table'
 
 import { BAND_STYLE, groupStatus } from '../model/appearance'
@@ -44,7 +44,12 @@ export function StreamGroup({ campaignId, stream }: StreamGroupProps) {
           className="h-auto py-2 align-top whitespace-normal"
         >
           <StreamHeader stream={stream} />
-          {stream.dirty ? <DraftActions campaignId={campaignId} stream={stream} /> : null}
+          {stream.dirty ? (
+            <>
+              <DraftActions campaignId={campaignId} stream={stream} />
+              <DiffSummary stream={stream} />
+            </>
+          ) : null}
         </TableHead>
       </TableRow>
 
