@@ -1,6 +1,7 @@
 """That campaign 93212 — the one from the video, built by hand — opens in this editor.
 
-The numbers in the flow below sum to 50, and they stay at 50 all the way into the mirror.
+The reference campaign's two offers hold 25% each, and they stay at 25% all the way into
+the mirror.
 That is the invariant most likely to be "fixed" by somebody being helpful: a clean flow read
 from Keitaro is not normalised, because normalising it would invent traffic nobody asked
 for and show a screen the tracker disagrees with.
@@ -9,75 +10,24 @@ for and show a screen the tracker disagrees with.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 import pytest
 
 from adrobot.application.errors import CampaignAlreadyImportedError, UpstreamNotFoundError
 from adrobot.application.use_cases.mirror_campaign import ImportCampaign
-from adrobot.domain.campaign import Campaign, CampaignSetupStatus
-from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
-from adrobot.domain.stream import (
-    Stream,
-    StreamFilter,
-    StreamOffer,
-    StreamSchema,
-    StreamType,
-)
+from adrobot.domain.campaign import CampaignSetupStatus
+from adrobot.domain.ids import KeitaroCampaignId
 from tests.fake_persistence import FakeUnitOfWork, WatchesTheDatabase
-from tests.fakes import FakeClock, FakeKeitaroAdmin
+from tests.fakes import (
+    FIRST_CAMPAIGN_ID,
+    REFERENCE_OFFERS,
+    FakeClock,
+    FakeKeitaroAdmin,
+    given_reference_campaign,
+)
 
-HAND_BUILT = KeitaroCampaignId(93212)
-FIRST_OFFER = OfferId(11112)
-SECOND_OFFER = OfferId(11234)
-
-
-def hand_built_campaign(admin: FakeKeitaroAdmin) -> Campaign:
-    """Put campaign 93212 and its two flows into the tracker, as the video shows them."""
-    campaign = admin.given_campaign(
-        Campaign(id=HAND_BUILT, alias="Gd7Hk2", name="AU | Oxys", state="active")
-    )
-    admin.given_stream(
-        Stream(
-            id=KeitaroStreamId(564220),
-            campaign_id=HAND_BUILT,
-            name="Flow 1",
-            type=StreamType.REGULAR,
-            schema=StreamSchema.REDIRECT,
-            action_type="http",
-            position=1,
-            action_payload="https://google.com",
-            filters=(StreamFilter(id=9, name="country", mode="accept", payload=("AU",)),),
-        )
-    )
-    admin.given_stream(
-        Stream(
-            id=KeitaroStreamId(564221),
-            campaign_id=HAND_BUILT,
-            name="Flow 2",
-            type=StreamType.REGULAR,
-            schema=StreamSchema.LANDINGS,
-            action_type="http",
-            position=2,
-            offers=(
-                StreamOffer(
-                    offer_id=FIRST_OFFER,
-                    share=25,
-                    state="active",
-                    row_id=1,
-                    created_at=datetime(2026, 9, 1, tzinfo=UTC),
-                ),
-                StreamOffer(
-                    offer_id=SECOND_OFFER,
-                    share=25,
-                    state="active",
-                    row_id=2,
-                    created_at=datetime(2026, 9, 2, tzinfo=UTC),
-                ),
-            ),
-        )
-    )
-    return campaign
+HAND_BUILT = KeitaroCampaignId(FIRST_CAMPAIGN_ID)
+FIRST_OFFER, SECOND_OFFER = REFERENCE_OFFERS
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -95,7 +45,7 @@ def world(admin: FakeKeitaroAdmin | None = None, *, seeded: bool = True) -> Worl
     uow = FakeUnitOfWork(clock)
     tracker = admin if admin is not None else FakeKeitaroAdmin()
     if seeded:
-        hand_built_campaign(tracker)
+        given_reference_campaign(tracker)
     return World(
         imports=ImportCampaign(admin=tracker, uow=uow, clock=clock),
         admin=tracker,

@@ -45,7 +45,13 @@ from adrobot.domain.campaign import (
     TrafficSource,
 )
 from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
-from adrobot.domain.stream import Stream, StreamOffer
+from adrobot.domain.stream import (
+    Stream,
+    StreamFilter,
+    StreamOffer,
+    StreamSchema,
+    StreamType,
+)
 from adrobot.domain.values import CampaignAlias, OfferState
 
 if TYPE_CHECKING:
@@ -61,6 +67,18 @@ if TYPE_CHECKING:
 FIRST_CAMPAIGN_ID = 93212
 FIRST_STREAM_ID = 564221
 FIRST_MOMENT = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+REFERENCE_OFFERS = (OfferId(11112), OfferId(11234))
+
+
+def _issuing_after(ids: count[int], given: int) -> count[int]:
+    """Move an id counter past one that was handed in, so a create cannot reissue it.
+
+    The video's identifiers are the ones a test seeds with, and they are also where these
+    counters start: without this, a scenario that seeds flow 564221 and then creates one
+    would get 564221 back and silently overwrite the flow it was editing.
+    """
+    return count(max(next(ids), given + 1))
+
 
 DEFAULT_REFERENCE = ReferenceData(
     campaign_groups=(Group(id=7, name="AD Robot"),),
@@ -105,6 +123,7 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
     def given_campaign(self, campaign: Campaign) -> Campaign:
         """Put a campaign into the tracker as if somebody had built it by hand."""
         self.campaigns[campaign.id] = campaign
+        self._campaign_ids = _issuing_after(self._campaign_ids, campaign.id)
         return campaign
 
     def given_stream(self, stream: Stream) -> Stream:
@@ -114,6 +133,7 @@ class FakeKeitaroAdmin(KeitaroAdminPort):
         among them — so a scenario needs a way to say "this was already there".
         """
         self.streams[stream.id] = stream
+        self._stream_ids = _issuing_after(self._stream_ids, stream.id)
         return stream
 
     @override
@@ -337,3 +357,62 @@ class FakeAliasFactory(AliasFactory):
         alias = CampaignAlias(f"{self.stem}-{len(self.issued) + 1}")
         self.issued.append(alias)
         return alias
+
+
+def given_reference_campaign(admin: FakeKeitaroAdmin) -> Campaign:
+    """Seed the tracker with campaign 93212 and its two flows, as the video shows them.
+
+    The one campaign a reviewer is most likely to open, and the fixture part 2 is written
+    against. Flow 2's two offers hold 25% each: the shares of a flow nobody has recalculated
+    do not have to sum to 100, and every scenario that touches this campaign has to survive
+    that.
+    """
+    campaign = admin.given_campaign(
+        Campaign(
+            id=KeitaroCampaignId(FIRST_CAMPAIGN_ID),
+            alias="Gd7Hk2",
+            name="AU | Oxys",
+            state="active",
+        )
+    )
+    admin.given_stream(
+        Stream(
+            id=KeitaroStreamId(FIRST_STREAM_ID),
+            campaign_id=campaign.id,
+            name="Flow 1",
+            type=StreamType.REGULAR,
+            schema=StreamSchema.REDIRECT,
+            action_type="http",
+            position=1,
+            action_payload="https://google.com",
+            filters=(StreamFilter(id=9, name="country", mode="accept", payload=("AU",)),),
+        )
+    )
+    admin.given_stream(
+        Stream(
+            id=KeitaroStreamId(FIRST_STREAM_ID + 1),
+            campaign_id=campaign.id,
+            name="Flow 2",
+            type=StreamType.REGULAR,
+            schema=StreamSchema.LANDINGS,
+            action_type="http",
+            position=2,
+            offers=(
+                StreamOffer(
+                    offer_id=REFERENCE_OFFERS[0],
+                    share=25,
+                    state="active",
+                    row_id=1,
+                    created_at=FIRST_MOMENT,
+                ),
+                StreamOffer(
+                    offer_id=REFERENCE_OFFERS[1],
+                    share=25,
+                    state="active",
+                    row_id=2,
+                    created_at=FIRST_MOMENT + timedelta(days=1),
+                ),
+            ),
+        )
+    )
+    return campaign
