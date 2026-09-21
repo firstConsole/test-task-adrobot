@@ -73,20 +73,39 @@ def block_reason(view: StreamView, diff: DraftDiff | None) -> str | None:
 def warnings_for(view: StreamView) -> tuple[str, ...]:
     """Say what is worth saying about this flow without stopping the push.
 
-    One warning so far, and it is the one the conflict check turns into a refusal at the
-    tracker: the mirror has moved since the draft was opened, so what is on screen was
-    diffed against a state Keitaro may no longer hold. Said here as a warning because a
-    fetch is somebody's own doing, and refusing a push on the strength of our own cache
-    would be this service second-guessing the button it just offered.
+    Both warnings are about a gap between what somebody is looking at and what the numbers
+    were computed from, and neither is a reason to refuse a button: one is our own cache
+    moving, the other is this service's own rule about pins working exactly as written.
     """
     draft = view.draft
-    if draft is None or draft.base_snapshot_hash == snapshot_hash(view.mirror_rows):
+    if draft is None:
         return ()
-    return (
-        (
+    said: list[str] = []
+    if draft.base_snapshot_hash != snapshot_hash(view.mirror_rows):
+        said.append(
             "this flow has been fetched from Keitaro since the draft was opened — "
             "pushing will overwrite what the tracker holds now"
-        ),
+        )
+    if _pinned_after_the_last_edit(draft.rows):
+        said.append(
+            "a pin on this flow was changed after the last edit — it moves shares at the "
+            "next edit, never at a push, so what is pushed is what is on screen"
+        )
+    return tuple(said)
+
+
+def _pinned_after_the_last_edit(rows: tuple[OfferRow, ...]) -> bool:
+    """Whether a pin has been set or moved since the shares were last divided.
+
+    Read off the rows rather than off a timestamp, and without running the arithmetic: every
+    edit ends in `redistribute`, which leaves an active pinned row holding exactly its pinned
+    value. A row where the two disagree is therefore a pin that arrived afterwards — and
+    pinning deliberately recalculates nothing, so it is still waiting for an edit to take
+    effect. Saying so is what keeps that from looking like the pin being ignored.
+    """
+    return any(
+        row.pinned_share is not None and not row.removed and row.share != row.pinned_share
+        for row in rows
     )
 
 

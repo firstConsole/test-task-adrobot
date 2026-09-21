@@ -197,6 +197,28 @@ class DraftStatusChangedError(ApplicationError):
         )
 
 
+class NothingToPushError(ApplicationError):
+    """The flow already reads the way the draft wants it, or has no draft at all.
+
+    One error for both because they are one answer: there is nothing here to write. The
+    button is dark in either case, so reaching this means a client pressed it anyway.
+    """
+
+    def __init__(self, stream_id: object) -> None:
+        super().__init__(
+            f"flow {stream_id} has nothing to push: it already reads the way this draft wants it"
+        )
+
+
+class PushBlockedError(ApplicationError):
+    """The draft would write a state this service will not ask the tracker to hold.
+
+    Carries the sentence the editor already had on screen as `block_reason`, so the refusal
+    and the dark button say the same thing in the same words rather than two services'
+    worth of phrasing about one situation.
+    """
+
+
 class PushAttemptSettledError(ApplicationError):
     """This attempt is already closed — a phase 3 returning after somebody took the push over."""
 

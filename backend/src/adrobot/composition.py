@@ -29,14 +29,18 @@ from zoneinfo import ZoneInfo
 
 from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPort
 from adrobot.application.ports.persistence import UnitOfWork
-from adrobot.application.ports.system import AliasFactory, Clock
+from adrobot.application.ports.system import AliasFactory, Clock, CorrelationIds
 from adrobot.application.reference import ReferenceResolver
 from adrobot.infrastructure.db.engine import database
 from adrobot.infrastructure.db.uow import unit_of_work
 from adrobot.infrastructure.keitaro.admin import HttpKeitaroAdmin
 from adrobot.infrastructure.keitaro.reports import HttpKeitaroReports
 from adrobot.infrastructure.keitaro.transport import keitaro_transport
-from adrobot.infrastructure.system import SecretsAliasFactory, SystemClock
+from adrobot.infrastructure.system import (
+    ContextCorrelationIds,
+    SecretsAliasFactory,
+    SystemClock,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -60,6 +64,7 @@ class AppPorts:
     references: ReferenceResolver
     aliases: AliasFactory
     clock: Clock
+    correlation: CorrelationIds
     unit_of_work: UnitOfWorkFactory
 
 
@@ -86,5 +91,6 @@ async def build_ports(settings: Settings) -> AsyncIterator[AppPorts]:
             references=ReferenceResolver(admin, clock),
             aliases=SecretsAliasFactory(),
             clock=clock,
+            correlation=ContextCorrelationIds(),
             unit_of_work=partial(unit_of_work, sessions),
         )

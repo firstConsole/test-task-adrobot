@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, override
 
 from adrobot.application.errors import UpstreamNotFoundError
 from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPort
-from adrobot.application.ports.system import AliasFactory, Clock
+from adrobot.application.ports.system import AliasFactory, Clock, CorrelationIds
 from adrobot.domain.campaign import (
     Campaign,
     CampaignBlueprint,
@@ -357,6 +357,25 @@ class FakeAliasFactory(AliasFactory):
         alias = CampaignAlias(f"{self.stem}-{len(self.issued) + 1}")
         self.issued.append(alias)
         return alias
+
+
+class FakeCorrelationIds(CorrelationIds):
+    """Correlation ids a test can predict, numbered in the order they were handed out.
+
+    Predictable on purpose: `push_attempts.correlation_id` is the join between one press of
+    PUSH TO KT and the log lines it produced, and a test that could not name the id could
+    only assert that *some* string was written.
+    """
+
+    def __init__(self, stem: str = "cid") -> None:
+        self.stem = stem
+        self.issued: list[str] = []
+
+    @override
+    def current(self) -> str:
+        issued = f"{self.stem}-{len(self.issued) + 1}"
+        self.issued.append(issued)
+        return issued
 
 
 def given_reference_campaign(admin: FakeKeitaroAdmin) -> Campaign:

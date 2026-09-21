@@ -46,7 +46,9 @@ from adrobot.application.errors import (
     DraftAlreadyOpenError,
     DraftBeingPushedError,
     DraftStatusChangedError,
+    NothingToPushError,
     PushAttemptSettledError,
+    PushBlockedError,
     StreamDoesNotRotateOffersError,
     StreamNotFoundError,
     UpstreamDeniedError,
@@ -154,6 +156,12 @@ PROBLEMS: Final[Mapping[type[Exception], Problem]] = {
     ),
     PushAttemptSettledError: Problem(
         status=409, code="push-attempt-settled", title="This push is already finished"
+    ),
+    NothingToPushError: Problem(
+        status=409, code="nothing-to-push", title="There is nothing here to push"
+    ),
+    PushBlockedError: Problem(
+        status=409, code="push-blocked", title="This flow cannot be pushed as it stands"
     ),
     OfferAlreadyInStreamError: Problem(
         status=409, code="offer-already-in-flow", title="That offer is already in this flow"

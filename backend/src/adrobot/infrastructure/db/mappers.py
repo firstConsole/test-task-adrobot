@@ -60,7 +60,14 @@ def to_mirror_rows(
                 # ordinals part company on the first add or BRING BACK, never before.
                 seq=ordinal,
                 activated_at=ordinal,
-                share=row.share,
+                # An active row keeps the tracker's own number, whatever it sums to. A
+                # removed one reads 0, because `share` is what the row receives and a row out
+                # of the rotation receives nothing — which is also the one invariant
+                # `redistribute` maintains on every row it returns. Without this a flow whose
+                # push dropped a row keeps drawing that row's last share underneath the word
+                # (removed), and a tombstone from the tracker's replace semantics would show a
+                # percentage nobody is sending traffic on.
+                share=0 if _is_removed(row) else row.share,
                 removed=_is_removed(row),
             )
             # start=1 twice over: ck_stream_draft_rows_ordinals_are_positive refuses a 0, and

@@ -400,13 +400,25 @@ def _kernel_rows(
                 offer_id=row.offer.offer_id,
                 seq=ordinal,
                 activated_at=ordinal,
-                share=row.offer.share,
-                removed=row.absent or row.offer.state != OfferState.ACTIVE.value,
+                # 0 for a removed row, as the SQL mapper does and for the reason given
+                # there: `share` is what the row receives, and a row out of the rotation
+                # receives nothing.
+                share=0 if _is_silenced(row) else row.offer.share,
+                removed=_is_silenced(row),
             )
             for ordinal, row in enumerate(ordered, start=1)
         ),
         pins,
     )
+
+
+def _is_silenced(row: MirroredRow) -> bool:
+    """Fold the two columns that can silence a row into the one distinction a screen draws.
+
+    Absent is a row the tracker stopped returning; a non-active state is one a push left
+    behind disabled. Both render grey, at 0%, with BRING BACK live.
+    """
+    return row.absent or row.offer.state != OfferState.ACTIVE.value
 
 
 def _live_draft(staged: StagedDraft, pins: Mapping[OfferId, int]) -> LiveDraft:
