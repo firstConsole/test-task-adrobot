@@ -2,8 +2,9 @@ import { useIsMutating, useMutation, useQueryClient } from '@tanstack/react-quer
 import { toast } from 'sonner'
 
 import type { Offer } from '@/entities/offer'
-import { campaignStreamsQuery } from '@/entities/stream'
+import { campaignStreamsQuery, type StreamAnswer } from '@/entities/stream'
 import { api, unwrap } from '@/shared/api/client'
+import { queryKeys } from '@/shared/api/query-keys'
 import { problemMessage } from '@/shared/lib/problem-message'
 
 import type { DraftOperation } from '../lib/optimistic'
@@ -12,6 +13,14 @@ import { withOperation, withStream } from '../lib/optimistic'
 /** Scopes the in-flight check to one flow, so a busy Flow 2 does not freeze Flow 1. */
 function draftMutationKey(campaignId: string, streamId: number) {
   return ['stream-draft', campaignId, streamId] as const
+}
+
+/** `50/50` — what the tracker now holds, read off the answer rather than worked out. */
+function activeShares(stream: StreamAnswer): string {
+  return stream.rows
+    .filter((row) => !row.removed)
+    .map((row) => String(row.share))
+    .join('/')
 }
 
 /**
@@ -67,7 +76,7 @@ export function useDraftOps(campaignId: string, streamId: number) {
   const staging = useIsMutating({ mutationKey }) > 0
 
   return {
-    /** True while any edit of this flow is in flight, whichever button started it. */
+    /** True while anything at all is in flight on this flow, whichever button started it. */
     staging,
     add: (offer: Offer) => {
       edit.mutate({ kind: 'add', offerId: offer.id, offer })
@@ -77,6 +86,72 @@ export function useDraftOps(campaignId: string, streamId: number) {
     },
     bringBack: (offerId: number) => {
       edit.mutate({ kind: 'bring_back', offerId })
+    },
+  }
+}
+
+/**
+ * Write one flow's draft to Keitaro, or throw the draft away.
+ *
+ * Neither is optimistic, and deliberately so: until the tracker has answered, nobody knows
+ * what it holds, and a screen that showed the new state early would be reporting a write that
+ * may not have happened. The push confirms itself with the numbers it wrote — `50/50` — so
+ * that the sentence on screen can be checked against the other window without leaving it.
+ *
+ * `CANCEL` does not touch the pins. They live in the mirror, not in the draft, which is what
+ * makes them survive both of these buttons — the reference tool behaves the same way.
+ */
+export function useDraftPush(campaignId: string, streamId: number) {
+  const queryClient = useQueryClient()
+  const { queryKey } = campaignStreamsQuery(campaignId)
+  const mutationKey = draftMutationKey(campaignId, streamId)
+
+  const land = (stream: StreamAnswer) => {
+    queryClient.setQueryData(queryKey, (view) =>
+      view === undefined ? view : withStream(view, stream),
+    )
+  }
+
+  const push = useMutation({
+    mutationKey,
+    mutationFn: () =>
+      unwrap(
+        api.POST('/api/v1/campaigns/{campaign_id}/streams/{stream_id}/draft/push', {
+          params: { path: { campaign_id: campaignId, stream_id: streamId } },
+          body: { overwrite: false },
+        }),
+      ),
+    onSuccess: (stream) => {
+      land(stream)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.campaigns.stats(campaignId) })
+      toast.success(`Written to Keitaro: ${activeShares(stream)}`)
+    },
+    onError: (error) => {
+      toast.error(problemMessage(error, 'Keitaro did not take the change.'))
+    },
+  })
+
+  const discard = useMutation({
+    mutationKey,
+    mutationFn: () =>
+      unwrap(
+        api.DELETE('/api/v1/campaigns/{campaign_id}/streams/{stream_id}/draft', {
+          params: { path: { campaign_id: campaignId, stream_id: streamId } },
+        }),
+      ),
+    onSuccess: land,
+    onError: (error) => {
+      toast.error(problemMessage(error, 'The draft could not be thrown away.'))
+    },
+  })
+
+  return {
+    working: useIsMutating({ mutationKey }) > 0,
+    push: () => {
+      push.mutate()
+    },
+    discard: () => {
+      discard.mutate()
     },
   }
 }

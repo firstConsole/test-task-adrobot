@@ -1,8 +1,12 @@
+import { cn } from 'cn'
+
 import { OfferLabel } from '@/entities/offer'
 import type { StreamRow } from '@/entities/stream'
 import { RowActions } from '@/features/stream-draft'
 import { Skeleton } from '@/shared/ui/skeleton'
 import { TableCell, TableRow } from '@/shared/ui/table'
+
+import { ROW_STYLE, type GroupStatus } from '../model/appearance'
 
 type OfferRowProps = {
   campaignId: string
@@ -10,6 +14,8 @@ type OfferRowProps = {
   /** Names the row for a screen reader: "Oxys in Flow 2", not "row 3 of 4". */
   streamName: string
   row: StreamRow
+  /** Dirty is a property of the flow, so the row is told rather than asked. */
+  status: GroupStatus
 }
 
 /**
@@ -21,11 +27,11 @@ type OfferRowProps = {
  * 33/33/33. `null` is an optimistic edit saying it does not know yet — the cell draws a
  * skeleton the width of the number rather than a stale one.
  */
-export function OfferRow({ campaignId, streamId, streamName, row }: OfferRowProps) {
+export function OfferRow({ campaignId, streamId, streamName, row, status }: OfferRowProps) {
   const offerName = row.offer?.name ?? `#${String(row.offer_id)}`
 
   return (
-    <TableRow aria-label={`${offerName} in ${streamName}`}>
+    <TableRow aria-label={`${offerName} in ${streamName}`} className={cn(ROW_STYLE[status])}>
       <TableCell className="whitespace-normal">
         <OfferLabel offerId={row.offer_id} offer={row.offer} withPreview />
       </TableCell>

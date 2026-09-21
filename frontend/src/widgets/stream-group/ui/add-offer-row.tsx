@@ -1,3 +1,4 @@
+import { cn } from 'cn'
 import { PlusIcon } from 'lucide-react'
 import { useState } from 'react'
 
@@ -6,12 +7,14 @@ import { useDraftOps } from '@/features/stream-draft'
 import { Button } from '@/shared/ui/button'
 import { TableCell, TableRow } from '@/shared/ui/table'
 
+import { BAND_STYLE, type GroupStatus } from '../model/appearance'
 import { COLUMN_COUNT } from '../model/columns'
 
 type AddOfferRowProps = {
   campaignId: string
   streamId: number
   streamName: string
+  status: GroupStatus
 }
 
 /**
@@ -21,12 +24,12 @@ type AddOfferRowProps = {
  * combobox that staged an edit the moment the list was navigated with the arrow keys would
  * stage three of them on the way to the fourth entry.
  */
-export function AddOfferRow({ campaignId, streamId, streamName }: AddOfferRowProps) {
+export function AddOfferRow({ campaignId, streamId, streamName, status }: AddOfferRowProps) {
   const [offer, setOffer] = useState<Offer | null>(null)
   const draft = useDraftOps(campaignId, streamId)
 
   return (
-    <TableRow className="hover:bg-transparent">
+    <TableRow className={cn(BAND_STYLE[status])}>
       <TableCell colSpan={COLUMN_COUNT} className="whitespace-normal">
         <div className="flex items-center gap-2">
           <OfferCombobox
