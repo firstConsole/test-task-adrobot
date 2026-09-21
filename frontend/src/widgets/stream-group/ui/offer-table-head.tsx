@@ -20,9 +20,6 @@ export function OfferTableHead() {
         <TableHead scope="col" className="w-24">
           Stats
         </TableHead>
-        <TableHead scope="col" className="w-32">
-          Trends
-        </TableHead>
         <TableHead scope="col" className="w-40 text-right">
           Actions
         </TableHead>

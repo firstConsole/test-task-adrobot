@@ -2,6 +2,7 @@ import { ExternalLinkIcon, TriangleAlertIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, useParams } from 'react-router'
 
+import { useCampaignNumbers } from '@/entities/stats'
 import { useCampaignStreams } from '@/entities/stream'
 import { FetchStreamsButton } from '@/features/sync-streams'
 import { ApiError } from '@/shared/api/client'
@@ -42,6 +43,9 @@ function Frame({ children }: { children: ReactNode }) {
 
 function CampaignStreams({ campaignId }: { campaignId: string }) {
   const streams = useCampaignStreams(campaignId)
+  // One read for the whole screen. Every Stats cell below is a lookup in what this returns,
+  // which is the difference between one report and one per row.
+  const numbers = useCampaignNumbers(campaignId)
 
   if (streams.isPending) {
     return (
@@ -118,6 +122,15 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
             mirrored {relativeTime(campaign.synced_at)}
           </span>
         )}
+        {/* The day and the zone are the tracker's, not this browser's: "clicks today" means
+            nothing until it says whose today. */}
+        {numbers === null ? null : (
+          <span className="text-muted-foreground text-xs">
+            {numbers.available
+              ? `clicks today — ${numbers.day} ${numbers.timezone}${numbers.stale ? ', last read that worked' : ''}`
+              : `no clicks today: ${numbers.unavailableReason ?? 'the tracker would not build the report'}`}
+          </span>
+        )}
       </div>
 
       <Frame>
@@ -135,7 +148,12 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
           </tbody>
         ) : (
           flows.map((flow) => (
-            <StreamGroup key={flow.keitaro_stream_id} campaignId={campaignId} stream={flow} />
+            <StreamGroup
+              key={flow.keitaro_stream_id}
+              campaignId={campaignId}
+              stream={flow}
+              numbers={numbers}
+            />
           ))
         )}
       </Frame>

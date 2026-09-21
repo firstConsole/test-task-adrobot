@@ -1,6 +1,7 @@
 import { cn } from 'cn'
 
 import { OfferLabel } from '@/entities/offer'
+import { StatsCell, type CampaignNumbers } from '@/entities/stats'
 import type { StreamRow } from '@/entities/stream'
 import { RowActions, ShareCell } from '@/features/stream-draft'
 import { TableCell, TableRow } from '@/shared/ui/table'
@@ -15,6 +16,8 @@ type OfferRowProps = {
   row: StreamRow
   /** Dirty is a property of the flow, so the row is told rather than asked. */
   status: GroupStatus
+  /** Read once for the whole screen; `null` until it arrives. */
+  numbers: CampaignNumbers | null
 }
 
 /**
@@ -25,7 +28,14 @@ type OfferRowProps = {
  * written with that offer explicitly disabled rather than dropped — which is the behaviour
  * the reference tool is recognised by.
  */
-export function OfferRow({ campaignId, streamId, streamName, row, status }: OfferRowProps) {
+export function OfferRow({
+  campaignId,
+  streamId,
+  streamName,
+  row,
+  status,
+  numbers,
+}: OfferRowProps) {
   const offerName = row.offer?.name ?? `#${String(row.offer_id)}`
 
   return (
@@ -45,8 +55,9 @@ export function OfferRow({ campaignId, streamId, streamName, row, status }: Offe
           offerName={offerName}
         />
       </TableCell>
-      <TableCell />
-      <TableCell />
+      <TableCell>
+        <StatsCell numbers={numbers} offerId={row.offer_id} offerName={offerName} />
+      </TableCell>
       <TableCell className="text-right">
         <RowActions campaignId={campaignId} streamId={streamId} row={row} offerName={offerName} />
       </TableCell>

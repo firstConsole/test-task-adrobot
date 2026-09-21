@@ -31,7 +31,6 @@ export function StreamGroupSkeleton() {
             <Skeleton className="h-4 w-9" />
           </TableCell>
           <TableCell />
-          <TableCell />
           <TableCell>
             <Skeleton className="ml-auto h-7 w-24" />
           </TableCell>

@@ -1,5 +1,6 @@
 import { cn } from 'cn'
 
+import type { CampaignNumbers } from '@/entities/stats'
 import { StreamHeader, type Stream } from '@/entities/stream'
 import { DiffSummary, DraftActions } from '@/features/stream-draft'
 import { TableBody, TableCell, TableHead, TableRow } from '@/shared/ui/table'
@@ -18,6 +19,8 @@ const ROTATES = 'landings'
 type StreamGroupProps = {
   campaignId: string
   stream: Stream
+  /** One read for the whole screen, handed down rather than fetched per cell. */
+  numbers: CampaignNumbers | null
 }
 
 /**
@@ -31,7 +34,7 @@ type StreamGroupProps = {
  * while the flow is dirty — which is also when the whole group turns amber. The unsaved thing
  * is the flow, so the flow is what is marked.
  */
-export function StreamGroup({ campaignId, stream }: StreamGroupProps) {
+export function StreamGroup({ campaignId, stream, numbers }: StreamGroupProps) {
   const streamId = stream.keitaro_stream_id
   const status = groupStatus(stream.dirty)
 
@@ -43,7 +46,7 @@ export function StreamGroup({ campaignId, stream }: StreamGroupProps) {
           scope="colgroup"
           className="h-auto py-2 align-top whitespace-normal"
         >
-          <StreamHeader stream={stream} />
+          <StreamHeader stream={stream} clicksToday={numbers?.clicksByStream.get(streamId) ?? null} />
           {stream.dirty ? (
             <>
               <DraftActions campaignId={campaignId} stream={stream} />
@@ -63,6 +66,7 @@ export function StreamGroup({ campaignId, stream }: StreamGroupProps) {
               streamName={stream.name}
               row={row}
               status={status}
+              numbers={numbers}
             />
           ))}
           <AddOfferRow
