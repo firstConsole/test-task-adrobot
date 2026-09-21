@@ -1,0 +1,18 @@
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import { RouterProvider } from 'react-router'
+
+import { QueryProvider } from './providers/query-provider'
+import { router } from './providers/router'
+import './styles/index.css'
+
+const container = document.getElementById('root')
+if (container === null) throw new Error('index.html is missing its #root element')
+
+createRoot(container).render(
+  <StrictMode>
+    <QueryProvider>
+      <RouterProvider router={router} />
+    </QueryProvider>
+  </StrictMode>,
+)

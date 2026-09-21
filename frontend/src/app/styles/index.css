@@ -1,0 +1,75 @@
+@import "tailwindcss" source(none);
+/* Automatic detection walks the whole project, so it harvested `.filter` out of
+   NGINX_ENVSUBST_FILTER and `.inline` out of the CSP's 'unsafe-inline'. Only what is
+   listed here is scanned for class names. */
+@source "../../../index.html";
+@source "../../**/*.{ts,tsx}";
+/* The variants (`data-open`, `data-closed`) and utilities the vendored shadcn
+   components are written against, and the animations Radix overlays use. Both are
+   resolved by Tailwind at build time and reach no bundle. */
+@import "shadcn/tailwind.css";
+@import "tw-animate-css";
+
+/* `@theme inline` and not `@theme`: every token below points at another custom property,
+   and plain `@theme` would freeze today's value into the utility class. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+/* One light palette. The reference tool is light, and the amber a dirty row is filled with
+   would have to be picked again for a dark background. */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+}
+
+@layer base {
+  /* Tailwind 4 defaults a border to `currentColor`, which would draw the offer table as a
+     black grid, and an outline to 1px of it, which loses the focus ring v3 drew. */
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+}

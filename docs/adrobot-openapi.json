@@ -1,0 +1,2378 @@
+{
+  "components": {
+    "schemas": {
+      "CampaignResponse": {
+        "description": "A campaign as this API answers for one.\n\n`public_url` is a plain string and not an `HttpUrl`: it is built from a domain name the\ntracker gave us, and a response model that refused to serialise somebody else's data\nwould turn a campaign that exists into a 500.",
+        "properties": {
+          "alias": {
+            "title": "Alias",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "keitaro_campaign_id": {
+            "title": "Keitaro Campaign Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url"
+          },
+          "requested_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Country"
+          },
+          "requested_offer_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Offer Id"
+          },
+          "setup_failure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why this campaign's flows are missing, filled in by the call that has just tried to build them. A campaign read back later says `needs_attention` without it.",
+            "title": "Setup Failure"
+          },
+          "setup_status": {
+            "$ref": "#/components/schemas/CampaignSetupStatus"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          }
+        },
+        "required": [
+          "id",
+          "keitaro_campaign_id",
+          "alias",
+          "name",
+          "state",
+          "setup_status",
+          "created_at"
+        ],
+        "title": "CampaignResponse",
+        "type": "object"
+      },
+      "CampaignSetupStatus": {
+        "description": "How far part 1 got with this campaign.\n\nThe tracker cannot answer it: the campaign exists there either way, and only a flow\nthat was never created tells the two apart.",
+        "enum": [
+          "ready",
+          "needs_attention"
+        ],
+        "title": "CampaignSetupStatus",
+        "type": "string"
+      },
+      "CampaignStatsResponse": {
+        "description": "One campaign's numbers for one day, with everything needed to caption them.\n\nA flow or an offer the report did not mention has no row at all, and that is deliberate:\na zero written here would be this service inventing a measurement. The screen draws an\nempty cell, which is what \"the tracker said nothing about this\" looks like.",
+        "properties": {
+          "available": {
+            "description": "Whether these rows are the tracker's numbers at all. False is not an empty day: a campaign with no traffic is available with no rows.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "day": {
+            "description": "The tracker's day, not this service's.",
+            "format": "date",
+            "title": "Day",
+            "type": "string"
+          },
+          "offers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OfferStatsResponse"
+            },
+            "title": "Offers",
+            "type": "array"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the tracker answered, and null when it never has.",
+            "title": "Read At"
+          },
+          "stale": {
+            "default": false,
+            "description": "These are the last numbers that could be read, not today's latest.",
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "streams": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StreamStatsResponse"
+            },
+            "title": "Streams",
+            "type": "array"
+          },
+          "timezone": {
+            "description": "The IANA zone `day` was worked out in.",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "unavailable_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the last attempt failed, in words a buyer reads.",
+            "title": "Unavailable Reason"
+          }
+        },
+        "required": [
+          "day",
+          "timezone",
+          "available"
+        ],
+        "title": "CampaignStatsResponse",
+        "type": "object"
+      },
+      "CampaignsPageResponse": {
+        "description": "One page and the token that continues it, `null` meaning there is nothing after.",
+        "properties": {
+          "campaigns": {
+            "items": {
+              "$ref": "#/components/schemas/CampaignResponse"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "campaigns"
+        ],
+        "title": "CampaignsPageResponse",
+        "type": "object"
+      },
+      "ConflictingState": {
+        "description": "Two readings of one flow, side by side, in the same shape so they can be diffed.\n\nCarried on the 409 a push answers when the flow has been edited in Keitaro meanwhile.\nA body that only said \"conflict\" would leave the screen with nothing to show and the\nperson with nothing to decide between overwriting and discarding.",
+        "properties": {
+          "push_would_write": {
+            "items": {
+              "$ref": "#/components/schemas/OfferShare"
+            },
+            "title": "Push Would Write",
+            "type": "array"
+          },
+          "tracker_holds": {
+            "items": {
+              "$ref": "#/components/schemas/OfferShare"
+            },
+            "title": "Tracker Holds",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tracker_holds",
+          "push_would_write"
+        ],
+        "title": "ConflictingState",
+        "type": "object"
+      },
+      "CreateCampaignRequest": {
+        "additionalProperties": false,
+        "description": "Part 1's three fields.",
+        "properties": {
+          "country": {
+            "description": "ISO 3166-1 alpha-2. Flow 1 catches this country and sends it away.",
+            "examples": [
+              "MX"
+            ],
+            "title": "Country",
+            "type": "string"
+          },
+          "name": {
+            "description": "What the campaign is called in the tracker.",
+            "title": "Name",
+            "type": "string"
+          },
+          "offer_id": {
+            "description": "The offer Flow 2 rotates, as the tracker numbers it.",
+            "exclusiveMinimum": 0.0,
+            "title": "Offer Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "country",
+          "offer_id"
+        ],
+        "title": "CreateCampaignRequest",
+        "type": "object"
+      },
+      "DraftDiffResponse": {
+        "description": "What the draft would change, for a person and for the tracker.\n\n`desired` is the exact payload a push sends, not a description of one: it is the same\ntuple, rendered by the same function. That is what makes PREVIEW a rehearsal.",
+        "properties": {
+          "added": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Added",
+            "type": "array"
+          },
+          "brought_back": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Brought Back",
+            "type": "array"
+          },
+          "desired": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/OfferShare"
+            },
+            "title": "Desired",
+            "type": "array"
+          },
+          "removed": {
+            "default": [],
+            "items": {
+              "type": "integer"
+            },
+            "title": "Removed",
+            "type": "array"
+          },
+          "share_changes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ShareChangeResponse"
+            },
+            "title": "Share Changes",
+            "type": "array"
+          }
+        },
+        "title": "DraftDiffResponse",
+        "type": "object"
+      },
+      "DraftOperationKind": {
+        "description": "The three edits the editor offers. Pinning is not among them: it changes no share.",
+        "enum": [
+          "add",
+          "remove",
+          "bring_back"
+        ],
+        "title": "DraftOperationKind",
+        "type": "string"
+      },
+      "DraftOperationRequest": {
+        "additionalProperties": false,
+        "description": "One edit: what to do, and to which offer.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DraftOperationKind"
+          },
+          "offer_id": {
+            "description": "The offer, as the tracker numbers it.",
+            "exclusiveMinimum": 0.0,
+            "title": "Offer Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind",
+          "offer_id"
+        ],
+        "title": "DraftOperationRequest",
+        "type": "object"
+      },
+      "EditDraftRequest": {
+        "additionalProperties": false,
+        "description": "A batch of edits, applied in order and all or nothing.",
+        "properties": {
+          "operations": {
+            "description": "Applied in the order given. One the flow refuses rolls back the whole batch, so a request that answers 409 has changed nothing.",
+            "items": {
+              "$ref": "#/components/schemas/DraftOperationRequest"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Operations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "title": "EditDraftRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImportCampaignRequest": {
+        "additionalProperties": false,
+        "description": "The one number that opens a campaign somebody else built.",
+        "properties": {
+          "keitaro_campaign_id": {
+            "description": "The campaign's id in Keitaro, as its URL shows it.",
+            "examples": [
+              93212
+            ],
+            "exclusiveMinimum": 0.0,
+            "title": "Keitaro Campaign Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "keitaro_campaign_id"
+        ],
+        "title": "ImportCampaignRequest",
+        "type": "object"
+      },
+      "InvalidField": {
+        "description": "One field a request was refused over, and who refused it.\n\n`location` is dotted from the outside in \u2014 `body.country`, `query.limit` \u2014 and a\ncomplaint the *tracker* made about a field it was sent is prefixed `tracker.`, so that\none list can carry both without a client having to ask which kind it is holding.",
+        "properties": {
+          "location": {
+            "title": "Location",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "location",
+          "message"
+        ],
+        "title": "InvalidField",
+        "type": "object"
+      },
+      "LivenessResponse": {
+        "description": "Body of `/healthz`.",
+        "properties": {
+          "status": {
+            "const": "ok",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "LivenessResponse",
+        "type": "object"
+      },
+      "OfferCatalogueSyncResponse": {
+        "description": "What one press of the refresh did.\n\n`synced_at` is `null` when the tracker listed no offers at all: the local copy was left\nexactly as it was, because an empty answer and a failed listing are the same answer from\nhere and emptying a working catalogue is the worse of the two mistakes.",
+        "properties": {
+          "offers": {
+            "description": "How many offers the tracker listed.",
+            "title": "Offers",
+            "type": "integer"
+          },
+          "synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synced At"
+          }
+        },
+        "required": [
+          "offers"
+        ],
+        "title": "OfferCatalogueSyncResponse",
+        "type": "object"
+      },
+      "OfferResponse": {
+        "description": "One catalogue offer, in the fields the reference tool's own label is made of.\n\n`11112 Oxys [BEAUTY-CL-BE_0155] [pl es -]` \u2014 the id, the name, the network and the\ncountries, which is every field here and no others.\n\n`country` is a tuple of plain strings and `preview_url` a plain `str`. Both are somebody\nelse's data: a dash is one of the values Keitaro really keeps in that array, and a\nresponse model that refused to serialise what the tracker sent would turn an offer that\nexists into a 500.",
+        "properties": {
+          "affiliate_network": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Affiliate Network"
+          },
+          "country": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Country",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "preview_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Url"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "state"
+        ],
+        "title": "OfferResponse",
+        "type": "object"
+      },
+      "OfferShare": {
+        "description": "One offer row of a flow, in the three fields the tracker itself keeps.",
+        "properties": {
+          "offer_id": {
+            "title": "Offer Id",
+            "type": "integer"
+          },
+          "share": {
+            "title": "Share",
+            "type": "integer"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "offer_id",
+          "share",
+          "state"
+        ],
+        "title": "OfferShare",
+        "type": "object"
+      },
+      "OfferStatsResponse": {
+        "description": "What one offer did today \u2014 one cell of the editor's Stats column.",
+        "properties": {
+          "clicks": {
+            "default": 0,
+            "title": "Clicks",
+            "type": "integer"
+          },
+          "conversions": {
+            "default": 0,
+            "title": "Conversions",
+            "type": "integer"
+          },
+          "offer_id": {
+            "title": "Offer Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offer_id"
+        ],
+        "title": "OfferStatsResponse",
+        "type": "object"
+      },
+      "OffersResponse": {
+        "description": "A page of the combobox. No cursor: the catalogue is searched, not walked.",
+        "properties": {
+          "offers": {
+            "items": {
+              "$ref": "#/components/schemas/OfferResponse"
+            },
+            "title": "Offers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "offers"
+        ],
+        "title": "OffersResponse",
+        "type": "object"
+      },
+      "PinOfferRequest": {
+        "additionalProperties": false,
+        "description": "The one number this API takes from a client, and it is still validated server-side.",
+        "properties": {
+          "share": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where to hold the row. Omitted means where it is now, which is the button as the screen offers it. Pinning recalculates nothing until the next edit.",
+            "title": "Share"
+          }
+        },
+        "title": "PinOfferRequest",
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "description": "A failure, as this API reports one.\n\nEvery member the RFC defines that this service fills in, plus the three that carry what\na screen does with a failure: the slug, the id to quote, and the campaign the problem is\nabout where there is one \u2014 which is what lets \"already imported\" offer to open the\ncampaign instead of only refusing the request.",
+        "properties": {
+          "campaign_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Campaign Id"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "conflict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConflictingState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "correlation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation Id"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/InvalidField"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code"
+        ],
+        "title": "ProblemDetails",
+        "type": "object"
+      },
+      "PushDraftRequest": {
+        "additionalProperties": false,
+        "description": "What the push may do about a flow somebody edited in Keitaro meanwhile.",
+        "properties": {
+          "overwrite": {
+            "default": false,
+            "description": "Push over changes made in the tracker since this draft was opened. The answer to a 409 and nothing else: overwriting another person's work is a decision.",
+            "title": "Overwrite",
+            "type": "boolean"
+          }
+        },
+        "title": "PushDraftRequest",
+        "type": "object"
+      },
+      "ReadinessResponse": {
+        "description": "Body of `/readyz`.\n\n`checks` maps a component name to its verdict and is empty at 1.6, which is the\nhonest answer: nothing this process depends on exists yet. 5.8 adds\n`checks[\"database\"]` and, with it, the 503 branch and the `503` entry in this\noperation's OpenAPI responses \u2014 all three in one commit, and all before the frontend\ngenerates its types from this schema at 9.6. The shape around `checks` does not move.",
+        "properties": {
+          "checks": {
+            "additionalProperties": {
+              "enum": [
+                "ok",
+                "error"
+              ],
+              "type": "string"
+            },
+            "title": "Checks",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "checks"
+        ],
+        "title": "ReadinessResponse",
+        "type": "object"
+      },
+      "ShareChangeResponse": {
+        "description": "One offer's share, before and after \u2014 the `34 \u2192 33` of the diff summary.",
+        "properties": {
+          "now": {
+            "title": "Now",
+            "type": "integer"
+          },
+          "offer_id": {
+            "title": "Offer Id",
+            "type": "integer"
+          },
+          "was": {
+            "title": "Was",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offer_id",
+          "was",
+          "now"
+        ],
+        "title": "ShareChangeResponse",
+        "type": "object"
+      },
+      "StreamFilterResponse": {
+        "description": "One condition on a flow \u2014 `country accept [\"AU\"]` in the reference campaign.",
+        "properties": {
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "payload": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Payload",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "mode"
+        ],
+        "title": "StreamFilterResponse",
+        "type": "object"
+      },
+      "StreamResponse": {
+        "description": "One flow: its heading, its rows already ordered, and whether PUSH may be pressed.\n\n`absent` is a flow Keitaro has stopped returning. It is still drawn, because a flow that\nvanished from the tracker is something to be told about rather than something to hide.",
+        "properties": {
+          "absent": {
+            "default": false,
+            "title": "Absent",
+            "type": "boolean"
+          },
+          "block_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Reason"
+          },
+          "can_push": {
+            "default": false,
+            "title": "Can Push",
+            "type": "boolean"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftDiffResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dirty": {
+            "default": false,
+            "title": "Dirty",
+            "type": "boolean"
+          },
+          "filters": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StreamFilterResponse"
+            },
+            "title": "Filters",
+            "type": "array"
+          },
+          "keitaro_stream_id": {
+            "title": "Keitaro Stream Id",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "rows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StreamRowResponse"
+            },
+            "title": "Rows",
+            "type": "array"
+          },
+          "schema": {
+            "description": "`landings` is the only one that rotates offers. Flow 1 is a `redirect`.",
+            "title": "Schema",
+            "type": "string"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "keitaro_stream_id",
+          "name",
+          "schema"
+        ],
+        "title": "StreamResponse",
+        "type": "object"
+      },
+      "StreamRowResponse": {
+        "description": "One line of the offer table.\n\n`offer` is `null` for an offer the local catalogue has never heard of, which the screen\ndraws as `#11234 (not in catalogue)` rather than emptying itself. There is no foreign key\nfrom a flow row to the catalogue and there is not meant to be.",
+        "properties": {
+          "offer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OfferResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offer_id": {
+            "title": "Offer Id",
+            "type": "integer"
+          },
+          "pinned_share": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pinned Share"
+          },
+          "removed": {
+            "default": false,
+            "title": "Removed",
+            "type": "boolean"
+          },
+          "share": {
+            "title": "Share",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "offer_id",
+          "share"
+        ],
+        "title": "StreamRowResponse",
+        "type": "object"
+      },
+      "StreamStatsResponse": {
+        "description": "What one flow took today \u2014 the number the editor prints in the group heading.",
+        "properties": {
+          "clicks": {
+            "default": 0,
+            "title": "Clicks",
+            "type": "integer"
+          },
+          "keitaro_stream_id": {
+            "title": "Keitaro Stream Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "keitaro_stream_id"
+        ],
+        "title": "StreamStatsResponse",
+        "type": "object"
+      },
+      "StreamsResponse": {
+        "description": "The whole editor screen: the campaign in the toolbar, and its flows below it.",
+        "properties": {
+          "campaign": {
+            "$ref": "#/components/schemas/CampaignResponse"
+          },
+          "streams": {
+            "items": {
+              "$ref": "#/components/schemas/StreamResponse"
+            },
+            "title": "Streams",
+            "type": "array"
+          }
+        },
+        "required": [
+          "campaign",
+          "streams"
+        ],
+        "title": "StreamsResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "Shared token": {
+        "description": "The value of ADROBOT_ACCESS_TOKEN, as `Authorization: Bearer <token>`.",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "summary": "Creates Keitaro campaigns and redistributes offer shares inside a stream.",
+    "title": "AD Robot API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/campaigns": {
+      "get": {
+        "description": "Read one page. `after` is the `next_cursor` of the page before it, unread.",
+        "operationId": "list_campaigns_api_v1_campaigns_get",
+        "parameters": [
+          {
+            "description": "Free text over the name and the alias.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Free text over the name and the alias.",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "The `next_cursor` of the page before this one.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The `next_cursor` of the page before this one.",
+              "title": "After"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignsPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "List campaigns, newest first",
+        "tags": [
+          "campaigns"
+        ]
+      },
+      "post": {
+        "description": "Build the campaign part 1 describes, and report how far the tracker let us get.",
+        "operationId": "create_campaign_api_v1_campaigns_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCampaignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unprocessable Content"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Create a campaign with its two flows",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/import": {
+      "post": {
+        "description": "Mirror an existing campaign and its flows, which is what part 2 opens.",
+        "operationId": "import_campaign_api_v1_campaigns_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportCampaignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unprocessable Content"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Open a campaign the tracker already has",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/refetch": {
+      "post": {
+        "description": "FETCH STREAMS FROM KT. What the tracker no longer returns is kept and marked absent.",
+        "operationId": "refetch_campaign_api_v1_campaigns__campaign_id__refetch_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Read this campaign and its flows from the tracker again",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/repair": {
+      "post": {
+        "description": "Create whatever of the two flows the tracker does not have. Safe to press twice.",
+        "operationId": "repair_campaign_api_v1_campaigns__campaign_id__repair_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Finish a campaign whose flows were never built",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/stats": {
+      "get": {
+        "description": "Two reports behind one answer, cached for the whole process for forty-five seconds.\n\nNo 502 in the list above, and that is the endpoint's contract rather than an oversight:\na report the tracker would not build comes back as `available: false` with a reason.",
+        "operationId": "read_campaign_stats_api_v1_campaigns__campaign_id__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CampaignStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Read this campaign's clicks today, by flow and by offer",
+        "tags": [
+          "campaigns"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/streams": {
+      "get": {
+        "description": "Draw the whole screen in one answer: the mirror, the live draft over it, the pins.",
+        "operationId": "read_streams_api_v1_campaigns__campaign_id__streams_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Read one campaign's flows as the editor draws them",
+        "tags": [
+          "editor"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/streams/{stream_id}/draft": {
+      "delete": {
+        "description": "CANCEL. The pins survive it, and so do the tracker's own unnormalised shares.",
+        "operationId": "discard_draft_api_v1_campaigns__campaign_id__streams__stream_id__draft_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Throw this flow's staged edits away",
+        "tags": [
+          "editor"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/streams/{stream_id}/draft/operations": {
+      "post": {
+        "description": "Apply a batch of edits. All or nothing: a refusal leaves the flow exactly as it was.",
+        "operationId": "edit_draft_api_v1_campaigns__campaign_id__streams__stream_id__draft_operations_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Stage add, remove and bring back on this flow",
+        "tags": [
+          "editor"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/streams/{stream_id}/draft/preview": {
+      "get": {
+        "description": "Rehearse the push: `diff.desired` is the payload it would send, not a description.",
+        "operationId": "preview_draft_api_v1_campaigns__campaign_id__streams__stream_id__draft_preview_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Show what pressing PUSH would send, without sending it",
+        "tags": [
+          "editor"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/streams/{stream_id}/draft/push": {
+      "post": {
+        "description": "PUSH TO KT. A 409 carrying `conflict` means somebody edited the flow in Keitaro.",
+        "operationId": "push_draft_api_v1_campaigns__campaign_id__streams__stream_id__draft_push_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PushDraftRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Write this flow's draft to the tracker",
+        "tags": [
+          "editor"
+        ]
+      }
+    },
+    "/api/v1/campaigns/{campaign_id}/streams/{stream_id}/offers/{offer_id}/pin": {
+      "delete": {
+        "description": "Release the pin if there is one. Silent when there is not: a second press is not an error.",
+        "operationId": "unpin_offer_api_v1_campaigns__campaign_id__streams__stream_id__offers__offer_id__pin_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "title": "Offer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Let one row back into the division",
+        "tags": [
+          "editor"
+        ]
+      },
+      "put": {
+        "description": "Pin a row. Deliberately moves no other share and lights no button \u2014 see the use case.",
+        "operationId": "pin_offer_api_v1_campaigns__campaign_id__streams__stream_id__offers__offer_id__pin_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "campaign_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Campaign Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "stream_id",
+            "required": true,
+            "schema": {
+              "title": "Stream Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "offer_id",
+            "required": true,
+            "schema": {
+              "title": "Offer Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PinOfferRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Hold one row's share where it is",
+        "tags": [
+          "editor"
+        ]
+      }
+    },
+    "/api/v1/offers": {
+      "get": {
+        "description": "No text is SHOW ALL OFFERS. An id prefix outranks a name that merely contains it.",
+        "operationId": "search_offers_api_v1_offers_get",
+        "parameters": [
+          {
+            "description": "Matched against the offer id as a prefix, and the name.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Matched against the offer id as a prefix, and the name.",
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OffersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unprocessable Content"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Search the mirrored offer catalogue",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/api/v1/offers/sync": {
+      "post": {
+        "description": "`synced_at` is null when the tracker listed nothing: the copy was left alone.",
+        "operationId": "sync_offers_api_v1_offers_sync_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferCatalogueSyncResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Unauthorized"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              },
+              "application/problem+json": {}
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "security": [
+          {
+            "Shared token": []
+          }
+        ],
+        "summary": "Read the tracker's whole offer list again",
+        "tags": [
+          "offers"
+        ]
+      }
+    },
+    "/healthz": {
+      "get": {
+        "description": "Answer 200 for as long as the process can serve a request.\n\nDependency-free on purpose: a liveness probe that touches the database turns a slow\nquery into a container restart loop.",
+        "operationId": "healthz_healthz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness probe",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "Report whether this process is ready to take traffic.\n\nAt 1.6 it has nothing to ask: there is no database yet, and the tracker is not\nallowed to be part of this verdict. It answers 200 with an empty `checks` rather than\ninventing a component that cannot fail.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Readiness probe",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  }
+}

@@ -1,9 +1,12 @@
-# Four jobs, one per kind of failure, so a red run says which kind without being opened.
+# Six jobs, one per kind of failure, so a red run says which kind without being opened.
 #
-# PLAN-BACKEND §11 describes six. The two that are missing are missing because they cannot
-# pass yet, and a job that is allowed to fail is a job nobody reads:
+# PLAN-BACKEND §11 describes six of them; `openapi` is one it does not, because the types
+# the frontend is built from are generated from a document this repository commits, and
+# only the routers can say whether that document is still true.
 #
-#   frontend        there is no frontend/ until stage 9.
+# Still missing, because it cannot pass yet and a job that is allowed to fail is a job
+# nobody reads:
+#
 #   compose-smoke   it is specified as "the literal commands from the README", and the
 #                   README is written at 12.1. The stack itself already comes up; what is
 #                   missing is the thing the job is supposed to be checking.
@@ -115,3 +118,48 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql+asyncpg://adrobot:adrobot@127.0.0.1:5432/adrobot
         run: poetry run pytest
+
+  openapi:
+    name: openapi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/python-env
+      # docs/adrobot-openapi.json is committed and the frontend generates its TypeScript
+      # from it, so a request model changed without regenerating it is a frontend that
+      # type-checks against an API that no longer exists.
+      - name: make openapi
+        run: make openapi
+      - name: the committed document still matches the routers
+        run: git diff --exit-code -- docs/adrobot-openapi.json
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      # The version in .nvmrc, which is also the one the Dockerfile builds with. The two
+      # paths here are relative to the repository and not to `working-directory`.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # `ci` and not `install`: it installs the lock file and refuses a drifted manifest.
+      - name: npm ci
+        run: npm ci
+      # The other half of the pair the `openapi` job holds: the document is current, and
+      # this says the checked-in types were generated from it.
+      - name: generated types are current
+        run: npm run api:types:check
+      - name: eslint
+        run: npm run lint
+      - name: tsc
+        run: npm run typecheck
+      - name: vite build
+        run: npm run build

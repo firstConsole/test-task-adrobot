@@ -14,7 +14,7 @@ POETRY  ?= poetry
 RUN     := $(POETRY) run
 
 .DEFAULT_GOAL := help
-.PHONY: help install hooks up down migrate revision test fast cov lint typecheck imports probe
+.PHONY: help install hooks up down migrate revision openapi test fast cov lint typecheck imports probe
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -80,6 +80,12 @@ typecheck: ## Type-check src, tests, alembic and scripts under mypy strict
 # run, so a rename mid-refactor would hide the other two. CI runs it as its own job.
 imports: ## Check the layer boundaries
 	cd $(BACKEND) && $(RUN) lint-imports --no-logo --no-cache
+
+# Regenerated whenever a request or response model changes: docs/adrobot-openapi.json is
+# what the frontend generates its TypeScript from, and CI fails on a drift in either
+# direction (`make openapi && git diff --exit-code`, then `npm run api:types:check`).
+openapi: ## Write docs/adrobot-openapi.json from the routers
+	cd $(BACKEND) && $(RUN) python scripts/dump_openapi.py
 
 # --- the tracker ----------------------------------------------------------------------
 

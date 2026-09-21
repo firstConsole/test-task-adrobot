@@ -5,6 +5,7 @@
 #   .env.example                                     source of truth for the ADROBOT_* names
 #   backend/alembic/versions/*.py                    migrations are source, not artefacts
 #   docs/keitaro-openapi.json                        the Keitaro spec we develop against
+#   docs/adrobot-openapi.json                        our own spec; CI fails on a drift
 #   frontend/src/shared/api/schema.gen.ts            CI regenerates it and fails on drift
 
 # Python
