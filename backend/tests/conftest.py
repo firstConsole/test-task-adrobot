@@ -321,13 +321,16 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker("db")
 
 
-# Deliberately not here yet, and which stage brings it:
+# Nothing is deliberately missing from this file any more.
 #
-#   7.x   a fixture for a campaign with a live draft. The editor is the first thing that
-#         wants one, and what a draft should be seeded with is not knowable before there is
-#         a scenario editing it.
-#
-# What used to be on this list and has arrived: the `world` of fakes above (6.6), the
+# What used to be on that list and has arrived: the `world` of fakes above (6.6), the
 # `client` that enters the lifespan by hand (6.6) and the shared token, which is a header a
 # test module sets on the client it was handed rather than a second client fixture — one
 # line where a fixture would have been a second thing to keep in step with `Settings`.
+#
+# The last entry was "a fixture for a campaign with a live draft", and stage 7 answered it
+# with functions rather than a fixture: `given_mirrored_campaign` and `given_staged_draft`
+# in `tests/helpers.py`. A fixture would have had to decide what the draft was seeded with,
+# and every editor test wants a different answer — so the seeding takes arguments, and it
+# goes through `EditDraft` rather than through the repositories, which is what stops it
+# becoming a second opinion about when a draft is opened.

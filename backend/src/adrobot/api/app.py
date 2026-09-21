@@ -12,7 +12,7 @@ from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
 from adrobot.api.errors import install_error_handlers
 from adrobot.api.middleware import AccessLogMiddleware, CorrelationIdMiddleware
-from adrobot.api.routers import campaigns, health
+from adrobot.api.routers import campaigns, drafts, health, offers, streams
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -95,6 +95,9 @@ def create_app(*, settings: Settings, ports_factory: PortsFactory) -> FastAPI:
     install_error_handlers(app, expose_internals=docs_enabled)
     app.include_router(health.router)
     app.include_router(campaigns.router)
+    app.include_router(streams.router)
+    app.include_router(drafts.router)
+    app.include_router(offers.router)
     return app
 
 

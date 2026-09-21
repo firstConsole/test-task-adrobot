@@ -47,6 +47,30 @@ class InvalidField(BaseModel):
     message: str
 
 
+class OfferShare(BaseModel):
+    """One offer row of a flow, in the three fields the tracker itself keeps."""
+
+    model_config = ConfigDict(frozen=True)
+
+    offer_id: int
+    share: int
+    state: str
+
+
+class ConflictingState(BaseModel):
+    """Two readings of one flow, side by side, in the same shape so they can be diffed.
+
+    Carried on the 409 a push answers when the flow has been edited in Keitaro meanwhile.
+    A body that only said "conflict" would leave the screen with nothing to show and the
+    person with nothing to decide between overwriting and discarding.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    tracker_holds: tuple[OfferShare, ...]
+    push_would_write: tuple[OfferShare, ...]
+
+
 class ProblemDetails(BaseModel):
     """A failure, as this API reports one.
 
@@ -66,6 +90,7 @@ class ProblemDetails(BaseModel):
     correlation_id: str | None = None
     campaign_id: UUID | None = None
     errors: tuple[InvalidField, ...] | None = None
+    conflict: ConflictingState | None = None
 
 
 def problem_responses(*statuses: int) -> dict[int | str, dict[str, Any]]:

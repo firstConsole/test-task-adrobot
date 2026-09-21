@@ -117,3 +117,24 @@ def test_the_snapshot_hash_changes_when_the_tracker_does() -> None:
 
     assert snapshot_hash(edited_elsewhere) != snapshot_hash(MIRROR)
     assert snapshot_hash(disabled_elsewhere) != snapshot_hash(MIRROR)
+
+
+def test_a_row_the_tracker_dropped_and_one_it_disabled_fingerprint_the_same() -> None:
+    """The two readings of one absence, which our tables and the wire spell differently.
+
+    A tracker that replaces the offers array drops a removed row; ours tombstones it and
+    keeps drawing it. Both mean the flow sends that offer nothing. If the fingerprint told
+    them apart, every push onto such a flow would report a conflict for ever and the only
+    symptom would be a button that had stopped working.
+    """
+    tombstoned = (*MIRROR[:2], offer_row(11111, seq=3, share=34, removed=True))
+    dropped = MIRROR[:2]
+
+    assert snapshot_hash(tombstoned) == snapshot_hash(dropped)
+
+
+def test_the_snapshot_hash_notices_a_removed_row_coming_back() -> None:
+    gone = (*MIRROR[:2], offer_row(11111, seq=3, share=0, removed=True))
+    returned = (*MIRROR[:2], offer_row(11111, seq=3, share=34))
+
+    assert snapshot_hash(gone) != snapshot_hash(returned)

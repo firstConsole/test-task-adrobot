@@ -1,8 +1,9 @@
-"""The two ports that are one line of the standard library each.
+"""The three ports that are a line or two of the standard library each.
 
 They are behind ports for what they do to a test, not for what they do here: a scenario
-that cannot say what time it is has to sleep, and one that cannot predict an alias has to
-read it out of the answer it is checking.
+that cannot say what time it is has to sleep, one that cannot predict an alias has to read
+it out of the answer it is checking, and one that cannot predict a correlation id cannot
+assert that the push wrote the right audit row.
 """
 
 from __future__ import annotations
@@ -11,8 +12,9 @@ import secrets
 from datetime import UTC, datetime
 from typing import Final, override
 
-from adrobot.application.ports.system import AliasFactory, Clock
+from adrobot.application.ports.system import AliasFactory, Clock, CorrelationIds
 from adrobot.domain.values import CampaignAlias
+from adrobot.logging import correlation_id, new_correlation_id
 
 ALIAS_ALPHABET: Final = "abcdefghijkmnpqrstuvwxyz23456789"
 """Lower case and digits, less `l`, `o`, `0` and `1`. An alias is read off a screen and typed
@@ -46,3 +48,15 @@ class SecretsAliasFactory(AliasFactory):
     @override
     def new(self) -> CampaignAlias:
         return CampaignAlias("".join(secrets.choice(ALIAS_ALPHABET) for _ in range(ALIAS_LENGTH)))
+
+
+class ContextCorrelationIds(CorrelationIds):
+    """The id the HTTP middleware bound for this request, or a fresh one outside a request."""
+
+    @override
+    def current(self) -> str:
+        bound = correlation_id()
+        # A CLI push and a scheduled sync are work worth correlating, and neither has a
+        # request that bound anything. Minting one here keeps the audit row joinable to
+        # whatever that process logged rather than leaving it NULL.
+        return bound if bound is not None else new_correlation_id()

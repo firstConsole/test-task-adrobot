@@ -19,13 +19,14 @@ What is modelled is what a use case can tell apart:
 *   **Tombstones, not deletes.** A flow or a row the tracker stopped returning is marked
     absent and stays readable, which is the behaviour the editor's grey BRING BACK rows
     depend on.
+*   **The pin is joined in on the way out, never stored on a draft row.** It lives in its
+    own table, as it does in PostgreSQL, because it has to survive both a push and a cancel
+    — and a second home for it on the draft is one that could fall out of step.
 
 What is not modelled is SQL: `lock` takes nothing, because one process and one event loop
 have nothing to take it from. The locking itself is held to PostgreSQL in
-`tests/infrastructure/test_db_editor.py`, which is where it can be.
-
-The four repositories that raise are the ones the editor uses, and stage 7 fills them in
-when it has a scenario to hold them to.
+`tests/infrastructure/test_db_editor.py`, which is where it can be. The uniqueness of a
+live draft is modelled, because it is a rule a scenario meets rather than a race.
 """
 
 from __future__ import annotations
@@ -33,12 +34,15 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, NoReturn, override
+from typing import TYPE_CHECKING, override
 from uuid import uuid4
 
 from adrobot.application.errors import (
     CampaignAlreadyImportedError,
     CampaignNotFoundError,
+    DraftAlreadyOpenError,
+    DraftStatusChangedError,
+    PushAttemptSettledError,
     StreamNotFoundError,
 )
 from adrobot.application.ports.persistence import (
@@ -58,40 +62,34 @@ from adrobot.application.ports.persistence import (
     Transaction,
     UnitOfWork,
 )
-from adrobot.domain.draft import to_kernel_rows
+from adrobot.application.push import PushOutcome
+from adrobot.domain.diff import DesiredOffer
+from adrobot.domain.draft import LIVE_DRAFT_STATUSES, DraftStatus, to_kernel_rows
 from adrobot.domain.ids import (
     CampaignId,
+    DraftId,
     KeitaroCampaignId,
     KeitaroStreamId,
     OfferId,
     PushAttemptId,
 )
+from adrobot.domain.offer import Offer
 from adrobot.domain.shares import OfferRow
 from adrobot.domain.stream import StreamOffer
 from adrobot.domain.values import OfferState
 from tests.fakes import FakeKeitaroAdmin
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Collection, Mapping
+    from collections.abc import AsyncIterator, Collection, Iterable, Mapping
     from contextlib import AbstractAsyncContextManager
 
     from adrobot.application.ports.persistence import CampaignSetup
     from adrobot.application.ports.system import Clock
-    from adrobot.application.push import PushOutcome
     from adrobot.domain.campaign import Campaign, CampaignSetupStatus
-    from adrobot.domain.diff import DesiredOffer
-    from adrobot.domain.draft import DraftStatus
-    from adrobot.domain.ids import DraftId
-    from adrobot.domain.offer import Offer
     from adrobot.domain.stream import Stream
     from adrobot.domain.values import Share
 
 _OLDEST = datetime.min.replace(tzinfo=UTC)
-
-
-def _not_yet(what: str) -> NoReturn:
-    message = f"the in-memory {what} is written at stage 7, with the scenario that needs it"
-    raise NotImplementedError(message)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -102,6 +100,47 @@ class MirroredRow:
     absent: bool = False
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StagedDraft:
+    """One `stream_drafts` row with its `stream_draft_rows` inside it.
+
+    The rows carry no `pinned_share`, exactly as the column list does not: `draft_row_values`
+    drops it on the way in and `to_draft_rows` rejoins it on the way out.
+    """
+
+    id: DraftId
+    stream_id: KeitaroStreamId
+    status: DraftStatus
+    base_snapshot_hash: str
+    rows: tuple[OfferRow, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RecordedPush:
+    """One `push_attempts` row.
+
+    `seq` stands in for the uuid the real table breaks a tie on: `now()` is one instant for a
+    whole transaction, so two attempts written in one block share `started_at` exactly, and
+    `latest_for` still has to answer the same way twice.
+    """
+
+    id: PushAttemptId
+    draft_id: DraftId
+    outcome: PushOutcome
+    desired: tuple[DesiredOffer, ...]
+    correlation_id: str
+    started_at: datetime
+    seq: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CataloguedOffer:
+    """One `offers` row, and whether the tracker has stopped listing it."""
+
+    offer: Offer
+    absent: bool = False
+
+
 @dataclass
 class Tables:
     """Every table these fakes hold, in one object, so that a block can snapshot the lot."""
@@ -109,6 +148,10 @@ class Tables:
     campaigns: dict[CampaignId, MirroredCampaign] = field(default_factory=dict)
     streams: dict[KeitaroStreamId, MirroredStream] = field(default_factory=dict)
     rows: dict[KeitaroStreamId, dict[OfferId, MirroredRow]] = field(default_factory=dict)
+    pins: dict[KeitaroStreamId, dict[OfferId, int]] = field(default_factory=dict)
+    drafts: dict[DraftId, StagedDraft] = field(default_factory=dict)
+    pushes: dict[PushAttemptId, RecordedPush] = field(default_factory=dict)
+    catalogue: dict[OfferId, CataloguedOffer] = field(default_factory=dict)
 
     def copy(self) -> Tables:
         """Take the snapshot a rollback restores. Every value is frozen, so this is shallow."""
@@ -116,7 +159,42 @@ class Tables:
             campaigns=dict(self.campaigns),
             streams=dict(self.streams),
             rows={stream: dict(held) for stream, held in self.rows.items()},
+            pins={stream: dict(held) for stream, held in self.pins.items()},
+            drafts=dict(self.drafts),
+            pushes=dict(self.pushes),
+            catalogue=dict(self.catalogue),
         )
+
+
+def _flow_of(
+    tables: Tables, *, campaign_id: CampaignId, stream_id: KeitaroStreamId
+) -> MirroredStream | None:
+    """Find this campaign's flow, `None` covering both "no such flow" and "not yours".
+
+    The one scope predicate these fakes have, spelled once for the same reason `_flow()` is
+    spelled once in the real repositories: a row of `stream_offers`, `offer_pins` or
+    `stream_drafts` names no campaign of its own, so leaving the campaign out is a lookup
+    that answers about somebody else's flow.
+    """
+    flow = tables.streams.get(stream_id)
+    return flow if flow is not None and flow.campaign_id == campaign_id else None
+
+
+def _live_draft_of(tables: Tables, stream_id: KeitaroStreamId) -> StagedDraft | None:
+    """The one draft a flow may have open or pushing, which the partial unique index enforces."""
+    return next(
+        (
+            draft
+            for draft in tables.drafts.values()
+            if draft.stream_id == stream_id and draft.status in LIVE_DRAFT_STATUSES
+        ),
+        None,
+    )
+
+
+def _stored(rows: Iterable[OfferRow]) -> tuple[OfferRow, ...]:
+    """Drop what the draft tables have no column for, which is the pin and only the pin."""
+    return tuple(replace(row, pinned_share=None) for row in rows)
 
 
 class FakeCampaigns(CampaignRepository):
@@ -237,8 +315,8 @@ class FakeStreams(StreamRepository):
 
     @override
     async def lock(self, *, campaign_id: CampaignId, stream_id: KeitaroStreamId) -> StreamView:
-        flow = self._tables.streams.get(stream_id)
-        if flow is None or flow.campaign_id != campaign_id:
+        flow = _flow_of(self._tables, campaign_id=campaign_id, stream_id=stream_id)
+        if flow is None:
             raise StreamNotFoundError(stream_id)
         return self._view(flow)
 
@@ -284,14 +362,24 @@ class FakeStreams(StreamRepository):
                 held[offer_id] = replace(row, absent=True)
 
     def _view(self, flow: MirroredStream) -> StreamView:
+        """Assemble one flow, reading its pins once and joining them into both sides.
+
+        Both sides out of the same mapping, which is what makes a pinned row read the same
+        in the mirror and in the draft.
+        """
+        stream_id = flow.keitaro_stream_id
+        pins = self._tables.pins.get(stream_id, {})
+        staged = _live_draft_of(self._tables, stream_id)
         return StreamView(
             stream=flow,
-            mirror_rows=_kernel_rows(self._tables.rows.get(flow.keitaro_stream_id, {})),
-            draft=None,
+            mirror_rows=_kernel_rows(self._tables.rows.get(stream_id, {}), pins),
+            draft=None if staged is None else _live_draft(staged, pins),
         )
 
 
-def _kernel_rows(held: Mapping[OfferId, MirroredRow]) -> tuple[OfferRow, ...]:
+def _kernel_rows(
+    held: Mapping[OfferId, MirroredRow], pins: Mapping[OfferId, int]
+) -> tuple[OfferRow, ...]:
     """Number the rows the way the tie-break reads them: oldest first, ordinals from one.
 
     The same order the SQL mapper spells, for the same reason — the last ordinal is the row
@@ -312,17 +400,46 @@ def _kernel_rows(held: Mapping[OfferId, MirroredRow]) -> tuple[OfferRow, ...]:
                 offer_id=row.offer.offer_id,
                 seq=ordinal,
                 activated_at=ordinal,
-                share=row.offer.share,
-                removed=row.absent or row.offer.state != OfferState.ACTIVE.value,
+                # 0 for a removed row, as the SQL mapper does and for the reason given
+                # there: `share` is what the row receives, and a row out of the rotation
+                # receives nothing.
+                share=0 if _is_silenced(row) else row.offer.share,
+                removed=_is_silenced(row),
             )
             for ordinal, row in enumerate(ordered, start=1)
         ),
-        {},
+        pins,
+    )
+
+
+def _is_silenced(row: MirroredRow) -> bool:
+    """Fold the two columns that can silence a row into the one distinction a screen draws.
+
+    Absent is a row the tracker stopped returning; a non-active state is one a push left
+    behind disabled. Both render grey, at 0%, with BRING BACK live.
+    """
+    return row.absent or row.offer.state != OfferState.ACTIVE.value
+
+
+def _live_draft(staged: StagedDraft, pins: Mapping[OfferId, int]) -> LiveDraft:
+    """Read a draft back as the last recalculation left it, with the pins rejoined.
+
+    The shares are carried and the ordinals are never renumbered: renumbering would re-elect
+    the row that takes the rounding remainder.
+    """
+    return LiveDraft(
+        id=staged.id,
+        status=staged.status,
+        base_snapshot_hash=staged.base_snapshot_hash,
+        rows=to_kernel_rows(sorted(staged.rows, key=lambda row: row.seq), pins),
     )
 
 
 class FakePins(PinRepository):
-    """Stage 7."""
+    """The pinned shares, held in the mirror so a pin survives both a push and a cancel."""
+
+    def __init__(self, tables: Tables) -> None:
+        self._tables = tables
 
     @override
     async def hold(
@@ -333,17 +450,32 @@ class FakePins(PinRepository):
         offer_id: OfferId,
         share: Share,
     ) -> None:
-        _not_yet("pins")
+        if _flow_of(self._tables, campaign_id=campaign_id, stream_id=stream_id) is None:
+            raise StreamNotFoundError(stream_id)
+        # `int()`: a `Share` would keep its subclass through the dictionary and read back as
+        # a validated type the column cannot hand out, which is a difference a test would
+        # eventually assert on.
+        self._tables.pins.setdefault(stream_id, {})[offer_id] = int(share)
 
     @override
     async def release(
         self, *, campaign_id: CampaignId, stream_id: KeitaroStreamId, offer_id: OfferId
     ) -> None:
-        _not_yet("pins")
+        """Silent on a flow that has no such pin, and on one that is not this campaign's.
+
+        The second half is the scope, not forgiveness: the real DELETE carries the campaign
+        in its own WHERE, so another campaign's pin is a row the statement never reaches.
+        """
+        if _flow_of(self._tables, campaign_id=campaign_id, stream_id=stream_id) is None:
+            return
+        self._tables.pins.get(stream_id, {}).pop(offer_id, None)
 
 
 class FakeDrafts(DraftRepository):
-    """Stage 7."""
+    """One flow's staged edits: at most one live draft, closed softly and never deleted."""
+
+    def __init__(self, tables: Tables) -> None:
+        self._tables = tables
 
     @override
     async def open_for(
@@ -354,51 +486,140 @@ class FakeDrafts(DraftRepository):
         rows: tuple[OfferRow, ...],
         base_snapshot_hash: str,
     ) -> LiveDraft:
-        _not_yet("drafts")
+        """Refuse an unknown flow before a taken one, which is the order the real insert answers in.
+
+        There the INSERT ... SELECT writes nothing in either case and the follow-up question
+        asks about the flow first; here the two checks are plain, and they are in that order
+        so that a URL naming another campaign's flow is a 404 rather than a 409 telling the
+        caller that somebody else's flow is busy.
+        """
+        if _flow_of(self._tables, campaign_id=campaign_id, stream_id=stream_id) is None:
+            raise StreamNotFoundError(stream_id)
+        if _live_draft_of(self._tables, stream_id) is not None:
+            raise DraftAlreadyOpenError(stream_id)
+        staged = StagedDraft(
+            id=DraftId(uuid4()),
+            stream_id=stream_id,
+            status=DraftStatus.OPEN,
+            base_snapshot_hash=base_snapshot_hash,
+            rows=_stored(rows),
+        )
+        self._tables.drafts[staged.id] = staged
+        return LiveDraft(
+            id=staged.id, status=staged.status, base_snapshot_hash=base_snapshot_hash, rows=rows
+        )
 
     @override
     async def replace_rows(self, draft_id: DraftId, rows: tuple[OfferRow, ...]) -> None:
-        _not_yet("drafts")
+        self._tables.drafts[draft_id] = replace(self._held(draft_id), rows=_stored(rows))
 
     @override
     async def change_status(
         self, draft_id: DraftId, *, was: DraftStatus, becomes: DraftStatus
     ) -> None:
-        _not_yet("drafts")
+        staged = self._held(draft_id)
+        if staged.status is not was:
+            raise DraftStatusChangedError(was, staged.status)
+        self._tables.drafts[draft_id] = replace(staged, status=becomes)
+
+    def _held(self, draft_id: DraftId) -> StagedDraft:
+        """A `KeyError` on a draft nobody opened, matching the real repository's own `one()`.
+
+        Nothing deletes a draft and no URL carries a draft id, so a missing one is this
+        service's own bug and deserves the 500 rather than a refusal a caller could act on.
+        """
+        return self._tables.drafts[draft_id]
 
 
 class FakePushAttempts(PushAttemptRepository):
-    """Stage 7."""
+    """The audit of one press of PUSH TO KT: opened before the tracker is called, closed after."""
+
+    def __init__(self, tables: Tables, at: datetime) -> None:
+        self._tables = tables
+        self._at = at
 
     @override
     async def start(
         self, *, draft_id: DraftId, desired: tuple[DesiredOffer, ...], correlation_id: str
     ) -> PushAttemptId:
-        _not_yet("push attempts")
+        attempt = RecordedPush(
+            id=PushAttemptId(uuid4()),
+            draft_id=draft_id,
+            outcome=PushOutcome.IN_FLIGHT,
+            desired=desired,
+            correlation_id=correlation_id,
+            started_at=self._at,
+            seq=len(self._tables.pushes) + 1,
+        )
+        self._tables.pushes[attempt.id] = attempt
+        return attempt.id
 
     @override
     async def settle(self, attempt_id: PushAttemptId, outcome: PushOutcome) -> None:
-        _not_yet("push attempts")
+        recorded = self._tables.pushes[attempt_id]
+        if recorded.outcome is not PushOutcome.IN_FLIGHT:
+            raise PushAttemptSettledError(attempt_id)
+        self._tables.pushes[attempt_id] = replace(recorded, outcome=outcome)
 
     @override
     async def latest_for(self, draft_id: DraftId) -> PushAttempt | None:
-        _not_yet("push attempts")
+        mine = [row for row in self._tables.pushes.values() if row.draft_id == draft_id]
+        if not mine:
+            return None
+        newest = max(mine, key=lambda row: (row.started_at, row.seq))
+        return PushAttempt(
+            id=newest.id,
+            outcome=newest.outcome,
+            started_at=newest.started_at,
+            correlation_id=newest.correlation_id,
+        )
 
 
 class FakeOfferCatalogue(OfferCatalogueRepository):
-    """Stage 7."""
+    """The local mirror of `GET /offers`, which exists because that endpoint takes no parameters."""
+
+    def __init__(self, tables: Tables) -> None:
+        self._tables = tables
 
     @override
     async def search(self, query: str | None, *, limit: int) -> tuple[Offer, ...]:
-        _not_yet("offer catalogue")
+        """The id arm ahead of the name arm, which is what `ORDER BY prefix DESC, id ASC` does.
+
+        Typing 11104 must not bury offer 11104 under an offer merely named `11104 Special`.
+        The SQL escapes `%` and `_` before they reach LIKE, so both sides match the literal
+        text a buyer typed and `startswith` is the same predicate.
+        """
+        present = [row.offer for row in self._tables.catalogue.values() if not row.absent]
+        typed = "" if query is None else query.strip()
+        if not typed:
+            return tuple(sorted(present, key=lambda offer: offer.id)[:limit])
+        folded = typed.casefold()
+        matched = [
+            offer
+            for offer in present
+            if str(offer.id).startswith(typed) or folded in offer.name.casefold()
+        ]
+        matched.sort(key=lambda offer: (not str(offer.id).startswith(typed), offer.id))
+        return tuple(matched[:limit])
 
     @override
     async def by_ids(self, offer_ids: Collection[OfferId]) -> Mapping[OfferId, Offer]:
-        _not_yet("offer catalogue")
+        """Tombstoned offers included, deliberately unlike `search`: a row can stay in a flow
+        after the tracker drops the offer, and the label has to survive."""
+        return {
+            offer_id: self._tables.catalogue[offer_id].offer
+            for offer_id in set(offer_ids)
+            if offer_id in self._tables.catalogue
+        }
 
     @override
     async def upsert_catalogue(self, offers: tuple[Offer, ...], *, at: datetime) -> None:
-        _not_yet("offer catalogue")
+        for offer in offers:
+            self._tables.catalogue[offer.id] = CataloguedOffer(offer=offer)
+        written = {offer.id for offer in offers}
+        for offer_id, held in self._tables.catalogue.items():
+            if offer_id not in written and not held.absent:
+                self._tables.catalogue[offer_id] = replace(held, absent=True)
 
 
 class FakeUnitOfWork(UnitOfWork):
@@ -425,14 +646,17 @@ class FakeUnitOfWork(UnitOfWork):
         self.blocks += 1
         self.open = True
         snapshot = self.tables.copy()
+        # Read once for the whole block, as `now()` is: two rows written either side of a
+        # tracker call that failed must not be datable to different moments.
+        at = self.clock.now()
         try:
             yield Transaction(
-                campaigns=FakeCampaigns(self.tables, self.clock.now()),
+                campaigns=FakeCampaigns(self.tables, at),
                 streams=FakeStreams(self.tables),
-                pins=FakePins(),
-                drafts=FakeDrafts(),
-                pushes=FakePushAttempts(),
-                offers=FakeOfferCatalogue(),
+                pins=FakePins(self.tables),
+                drafts=FakeDrafts(self.tables),
+                pushes=FakePushAttempts(self.tables, at),
+                offers=FakeOfferCatalogue(self.tables),
             )
         except BaseException:
             self.tables = snapshot

@@ -93,6 +93,11 @@ class HttpKeitaroAdmin(KeitaroAdminPort):
         return to_stream(created.json(), zone=self._zone)
 
     @override
+    async def get_stream(self, stream_id: KeitaroStreamId) -> Stream:
+        """Read one flow. The same request `replace_stream_offers` makes twice of its own."""
+        return await self._read_stream(stream_id)
+
+    @override
     async def update_stream(self, stream_id: KeitaroStreamId, spec: StreamSpec) -> Stream:
         """Write a flow back whole, `spec` being the state it should be left in."""
         written = await self._transport.put(f"/streams/{stream_id}", json=stream_body(spec))
