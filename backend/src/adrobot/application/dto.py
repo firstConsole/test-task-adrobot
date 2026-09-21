@@ -237,15 +237,39 @@ class CampaignStats:
     both printed beside it — and a service and a tracker in different zones disagree about
     which day today is for several hours of every one of them.
 
-    `read_at` is when this service asked the tracker, which is the same as "now" only while
-    nothing caches the answer.
+    `read_at` is when this service asked the tracker, and `None` where it never got an
+    answer to date. `unavailable_reason` is set whenever the last attempt failed — beside a
+    `read_at`, it means these numbers are older than they should be; without one, it means
+    there are no numbers. Both are readable through `available` and `stale` below.
     """
 
     day: date
     timezone: str
-    read_at: datetime
+    read_at: datetime | None = None
+    unavailable_reason: str | None = None
     streams: tuple[StreamClicks, ...] = ()
     offers: tuple[OfferClicks, ...] = ()
+
+    @property
+    def available(self) -> bool:
+        """Whether these rows are the tracker's numbers at all.
+
+        False is not the same answer as no rows: a campaign that took no traffic today has
+        nothing to show and `available` is still true. An empty column that cannot tell the
+        two apart says "zero clicks" about a tracker that was never asked.
+        """
+        return self.read_at is not None
+
+    @property
+    def stale(self) -> bool:
+        """Whether these are the last numbers that could be read rather than today's latest.
+
+        The three states this type has are `available and not stale` (read just now),
+        `available and stale` (read a while ago, and the refresh failed) and neither (the
+        tracker has not answered since this campaign was first looked at). `read_at` dates
+        the rows in the second case, which is what makes serving them honest.
+        """
+        return self.read_at is not None and self.unavailable_reason is not None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

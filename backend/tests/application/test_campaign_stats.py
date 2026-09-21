@@ -16,6 +16,7 @@ import pytest
 
 from adrobot.application.dto import OfferClicks, StreamClicks
 from adrobot.application.errors import CampaignNotFoundError
+from adrobot.application.statistics import StatsReader
 from adrobot.application.use_cases.campaign_stats import GetCampaignStats
 from adrobot.domain.ids import CampaignId, KeitaroCampaignId, KeitaroStreamId
 from adrobot.domain.offer import OfferStats
@@ -37,7 +38,7 @@ TODAYS_OFFERS = {
 def statistics(world: FakeWorld, *, timezone: str = "UTC") -> GetCampaignStats:
     """The scenario as `api/deps.py` assembles it, over this world's fakes."""
     return GetCampaignStats(
-        reports=world.reports, uow=world.uow, clock=world.clock, timezone=timezone
+        stats=StatsReader(world.reports, world.clock, timezone=timezone), uow=world.uow
     )
 
 
@@ -132,7 +133,7 @@ async def test_no_database_transaction_is_open_while_a_report_is_in_flight() -> 
     campaign_id, _ = await given_mirrored_campaign(world)
 
     stats = await GetCampaignStats(
-        reports=watching, uow=world.uow, clock=world.clock, timezone="UTC"
+        stats=StatsReader(watching, world.clock, timezone="UTC"), uow=world.uow
     )(campaign_id)
 
     assert StreamClicks(keitaro_stream_id=ROTATING_FLOW, clicks=7) in stats.streams

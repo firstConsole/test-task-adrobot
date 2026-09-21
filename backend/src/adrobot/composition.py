@@ -31,6 +31,7 @@ from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPo
 from adrobot.application.ports.persistence import UnitOfWork
 from adrobot.application.ports.system import AliasFactory, Clock, CorrelationIds
 from adrobot.application.reference import ReferenceResolver
+from adrobot.application.statistics import StatsReader
 from adrobot.infrastructure.db.engine import database
 from adrobot.infrastructure.db.uow import unit_of_work
 from adrobot.infrastructure.keitaro.admin import HttpKeitaroAdmin
@@ -62,6 +63,7 @@ class AppPorts:
     admin: KeitaroAdminPort
     reports: KeitaroReportsPort
     references: ReferenceResolver
+    statistics: StatsReader
     aliases: AliasFactory
     clock: Clock
     correlation: CorrelationIds
@@ -82,13 +84,17 @@ async def build_ports(settings: Settings) -> AsyncIterator[AppPorts]:
         # admin parses naive timestamps with a `tzinfo`, the report builder sends the IANA
         # name in the request body. Resolved once here rather than twice down there.
         admin = HttpKeitaroAdmin(transport, zone=ZoneInfo(settings.keitaro_timezone))
+        reports = HttpKeitaroReports(transport, timezone=settings.keitaro_timezone)
         yield AppPorts(
             admin=admin,
-            reports=HttpKeitaroReports(transport, timezone=settings.keitaro_timezone),
+            reports=reports,
             # One resolver for the process, which is what makes its five-minute cache worth
             # having and what makes the campaign group be created once rather than per
             # request.
             references=ReferenceResolver(admin, clock),
+            # And one reader, for the same reason: a window that every request rebuilt would
+            # be a window nothing ever falls inside.
+            statistics=StatsReader(reports, clock, timezone=settings.keitaro_timezone),
             aliases=SecretsAliasFactory(),
             clock=clock,
             correlation=ContextCorrelationIds(),
