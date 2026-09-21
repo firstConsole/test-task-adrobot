@@ -1,4 +1,4 @@
-"""That the two ports are abstract in the way a second implementation will rely on.
+"""That every port is abstract in the way a second implementation will rely on.
 
 A port whose method lost its `@abstractmethod` is the quiet kind of defect: the fake in
 `tests/fakes.py` inherits a body that returns `None`, every scenario test against it passes,
@@ -16,11 +16,34 @@ from typing import TYPE_CHECKING
 import pytest
 
 from adrobot.application.ports.keitaro import KeitaroAdminPort, KeitaroReportsPort
+from adrobot.application.ports.persistence import (
+    CampaignRepository,
+    DraftRepository,
+    OfferCatalogueRepository,
+    PinRepository,
+    PushAttemptRepository,
+    StreamRepository,
+    Transaction,
+    UnitOfWork,
+)
 
 if TYPE_CHECKING:
     from abc import ABCMeta
 
-PORTS = (KeitaroAdminPort, KeitaroReportsPort)
+# Every method is a call that goes somewhere — the network or the database — so every one
+# of them is awaited.
+AWAITABLE_PORTS = (
+    KeitaroAdminPort,
+    KeitaroReportsPort,
+    CampaignRepository,
+    StreamRepository,
+    PinRepository,
+    DraftRepository,
+    PushAttemptRepository,
+    OfferCatalogueRepository,
+)
+
+PORTS = (*AWAITABLE_PORTS, UnitOfWork)
 
 
 def _declared(port: ABCMeta) -> dict[str, object]:
@@ -54,10 +77,38 @@ def test_every_method_of_a_port_is_abstract(port: ABCMeta) -> None:
     )
 
 
-@pytest.mark.parametrize("port", PORTS)
+@pytest.mark.parametrize("port", AWAITABLE_PORTS)
 def test_every_method_of_a_port_is_awaitable(port: ABCMeta) -> None:
     synchronous = [
         name for name, member in _declared(port).items() if not inspect.iscoroutinefunction(member)
     ]
 
     assert not synchronous, f"{synchronous} would be awaited by the caller and is not async"
+
+
+def test_the_unit_of_work_hands_out_a_block_rather_than_a_coroutine() -> None:
+    # `begin()` is the one synchronous method in either port module: it returns the context
+    # manager, so a caller writes `async with uow.begin() as tx` and not
+    # `async with await uow.begin()`.
+    assert not inspect.iscoroutinefunction(UnitOfWork.begin)
+    assert set(_declared(UnitOfWork)) == {"begin"}
+
+
+def test_the_unit_of_work_offers_no_way_to_commit_or_roll_back_by_hand() -> None:
+    # Leaving the block commits and raising rolls back. A commit() here is one a use case
+    # could forget, and a rollback() is one it could call with the tracker half-written.
+    assert not {"commit", "rollback", "flush"} & set(vars(UnitOfWork))
+
+
+def test_a_transaction_is_the_only_place_a_repository_lives() -> None:
+    # Not an ABC: nothing about the bundle varies per implementation, and the one method
+    # somebody would add to an abstract one is the commit that must not be there.
+    assert set(Transaction.__dataclass_fields__) == {
+        "campaigns",
+        "streams",
+        "pins",
+        "drafts",
+        "pushes",
+        "offers",
+    }
+    assert not [name for name in vars(Transaction) if name in {"commit", "rollback"}]

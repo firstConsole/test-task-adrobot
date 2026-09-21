@@ -14,19 +14,39 @@ from typing import TYPE_CHECKING
 import httpx
 import pytest
 import structlog
+from sqlalchemy import event, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from adrobot.api.app import create_app
+from adrobot.infrastructure.db.engine import build_engine, build_sessionmaker
+from adrobot.infrastructure.db.uow import unit_of_work
 from adrobot.logging import configure_logging
 from adrobot.settings import Settings
-from tests.helpers import ENV_PREFIX, VALID_ENVIRONMENT
+from tests.helpers import (
+    DATABASE_URL_VARIABLE,
+    ENV_PREFIX,
+    LOCAL_DATABASE_URL,
+    ROWS_PER_TABLE,
+    TRUNCATE_EVERY_TABLE,
+    VALID_ENVIRONMENT,
+    Statements,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator
 
     from fastapi import FastAPI
+    from sqlalchemy.ext.asyncio import (
+        AsyncConnection,
+        AsyncEngine,
+        AsyncSession,
+        async_sessionmaker,
+    )
+
+    from adrobot.application.ports.persistence import UnitOfWork
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def anyio_backend() -> str:
     """Pin the event loop backend instead of inheriting anyio's parametrised fixture.
 
@@ -35,9 +55,11 @@ def anyio_backend() -> str:
     in transitively the suite silently doubles and the halves that touch asyncpg and
     `asyncio.*` start failing. This project runs on asyncio, so it says so.
 
-    Function-scoped, where anyio's is module-scoped: the first module-scoped async fixture
-    (the stage-5 engine, most likely) will need this widened, and the ScopeMismatch that
-    announces it is loud and one word to fix.
+    Session-scoped, where anyio's is module-scoped, and wider than the prediction this
+    docstring used to carry: the `postgres` engine below is a session-scoped async fixture,
+    and anyio keeps one event loop alive for exactly as long as an async fixture holds its
+    runner. Narrower than the engine and the answer is a ScopeMismatch; wider than the engine
+    and a pooled asyncpg connection outlives the loop that opened it.
     """
     return "asyncio"
 
@@ -126,6 +148,160 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
         yield http
 
 
+@pytest.fixture(scope="session")
+def database_settings() -> Settings:
+    """`Settings` for the cluster the suite talks to, built the one way the process builds one.
+
+    Exactly one variable is overridden: `VALID_ENVIRONMENT` names host `db`, the compose
+    service, which resolves nowhere else. `MonkeyPatch.context()` and not the `monkeypatch`
+    fixture, which is function-scoped — the block closes before this returns, so nothing of it
+    leaks into a test that asserts on the environment.
+    """
+    with pytest.MonkeyPatch.context() as environment:
+        for name, value in VALID_ENVIRONMENT.items():
+            environment.setenv(name, value)
+        environment.setenv(
+            ENV_PREFIX + "DATABASE_URL",
+            os.environ.get(DATABASE_URL_VARIABLE, LOCAL_DATABASE_URL),
+        )
+        return Settings()
+
+
+@pytest.fixture(scope="session")
+async def postgres(database_settings: Settings) -> AsyncIterator[AsyncEngine]:
+    """The one engine of the run, or the reason there is none.
+
+    Probed through `build_engine` rather than through a socket check of its own, so an
+    unreachable address costs the suite exactly what it costs a request — the same
+    three-second connect budget — once. A skip would hide a service container that never came
+    up, so on CI the same verdict is a failure. The URL is rendered through SQLAlchemy, which
+    masks the password; pydantic's own `str()` prints it.
+    """
+    engine = build_engine(database_settings)
+    try:
+        async with engine.connect() as probe:
+            await probe.execute(text("SELECT 1"))
+    except (OSError, SQLAlchemyError) as exc:
+        await engine.dispose()
+        unreachable = (
+            f"PostgreSQL is unreachable at {engine.url.render_as_string(hide_password=True)}: "
+            f"{type(exc).__name__}. Start it with `make up`, or point "
+            f"{DATABASE_URL_VARIABLE} at another cluster."
+        )
+        if os.environ.get("CI"):
+            pytest.fail(unreachable, pytrace=False)
+        pytest.skip(unreachable)
+    try:
+        yield engine
+    finally:
+        async with engine.connect() as census:
+            left = {
+                relation: rows
+                for relation, rows in (await census.execute(text(ROWS_PER_TABLE))).all()
+                if rows
+            }
+        await engine.dispose()
+    # The one check no single test can make: `db` rolls its own test back and
+    # `pooled_sessions` sweeps after itself, but a test that builds a sessionmaker off
+    # `postgres` by hand commits for real and nothing else would notice.
+    assert not left, f"the suite left rows behind: {left}"
+
+
+@pytest.fixture
+async def db(postgres: AsyncEngine) -> AsyncIterator[AsyncConnection]:
+    """One connection inside one transaction that is always rolled back.
+
+    A connection and not a session, because `SELECT count(*)` and `EXPLAIN` are assertions
+    about the database rather than about a repository, and because everything below is built
+    on it. What is load-bearing is `connection.begin()`: without it the session joins nothing,
+    its commit is a real COMMIT, and the row is still there in the next test.
+    """
+    async with postgres.connect() as connection:
+        outer = await connection.begin()
+        try:
+            yield connection
+        finally:
+            await outer.rollback()
+
+
+@pytest.fixture
+def sessions(db: AsyncConnection) -> async_sessionmaker[AsyncSession]:
+    """Sessions on the rolled-back connection, where a real COMMIT becomes a RELEASE SAVEPOINT.
+
+    `build_sessionmaker` and not a second one written here: `join_transaction_mode` is set
+    there precisely so that this binding works.
+    """
+    return build_sessionmaker(db)
+
+
+@pytest.fixture
+async def uow(sessions: async_sessionmaker[AsyncSession]) -> AsyncIterator[UnitOfWork]:
+    """The real unit of work over the rolled-back connection: one per test, as one per request.
+
+    `unit_of_work()` and not `SqlAlchemyUnitOfWork(session)`, so that `autobegin=False` — the
+    flag that makes a `Transaction` kept past its block raise rather than lose its writes — is
+    exercised by every database test and not only by the one that remembers it.
+    """
+    async with unit_of_work(sessions) as unit:
+        yield unit
+
+
+@pytest.fixture
+async def pooled_sessions(
+    postgres: AsyncEngine,
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Sessions straight off the pool, whose commits are real and visible to another connection.
+
+    For what a rollback cannot show: a `FOR UPDATE` blocking a concurrent INSERT needs a second
+    transaction, and a second transaction cannot see a row that was never committed. It pays
+    with a sweep instead of a rollback, which is why these fixtures own the cluster outright.
+    """
+    try:
+        yield build_sessionmaker(postgres)
+    finally:
+        async with postgres.begin() as sweep:
+            await sweep.execute(text(TRUNCATE_EVERY_TABLE))
+
+
+@pytest.fixture
+def statements(postgres: AsyncEngine) -> Iterator[Statements]:
+    """Count what the engine sends, for the tests that assert a constant number of statements.
+
+    On the engine and not on a connection, so that `selectinload`'s follow-up queries — which
+    are the whole point of the count — are seen. Removed in teardown: the engine outlives the
+    test, and a listener left behind would put the next test's SQL in a dead test's list.
+    """
+    counted = Statements()
+
+    def record(  # noqa: PLR0913, PLR0917
+        connection: object,
+        cursor: object,
+        statement: str,
+        parameters: object,
+        context: object,
+        executemany: bool,  # noqa: FBT001  # positional in SQLAlchemy's event signature
+    ) -> None:
+        counted.sent.append(statement)
+
+    event.listen(postgres.sync_engine, "before_cursor_execute", record)
+    try:
+        yield counted
+    finally:
+        event.remove(postgres.sync_engine, "before_cursor_execute", record)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark as `db` every test whose fixture closure reaches PostgreSQL.
+
+    Derived and never written by hand: the marker is a fact about the fixtures a test asked
+    for, so a test that forgot it would still open a connection while `-m "not db"` — the fast
+    loop, and any job without a service container — went on believing it had not.
+    """
+    for item in items:
+        if "postgres" in getattr(item, "fixturenames", ()):
+            item.add_marker("db")
+
+
 # Deliberately not here yet, and which stage brings it:
 #
 #   6.x   fixtures over tests/fakes.py. The fakes themselves arrived at 4.8; a fixture
@@ -135,6 +311,4 @@ async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
 #         still none to run: 4.3 gave the tracker client its own context manager instead
 #         of an application lifespan. The day create_app takes a ports factory, this
 #         becomes `async with app.router.lifespan_context(app): yield http`.
-#   5.1   a `db`-marked engine/session fixture that skips with a visible reason when
-#         Postgres is unreachable, and rolls back a transaction per test.
 #   6.8   an `authorised_client` carrying the shared token.

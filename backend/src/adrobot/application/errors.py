@@ -13,6 +13,11 @@ guessing at the slug and status each error carries. Two handlers cost a line.
 
 The names say `Upstream` and not `Keitaro`: this ring does not know which tracker it is
 wrapping, and the vendor belongs in the message, where a person reads it.
+
+The six at the foot are the persistence port's, and they are direct children of
+`ApplicationError` rather than of a `NotFoundError` and a `ConflictError`: what they have in
+common is the HTTP status 6.7 will render them as, which is a fact about the API and not
+about the failure.
 """
 
 from __future__ import annotations
@@ -21,6 +26,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    from adrobot.domain.draft import DraftStatus
 
 
 class ApplicationError(Exception):
@@ -101,3 +108,56 @@ class UpstreamProtocolError(UpstreamError):
         super().__init__(
             f"the tracker answered in a way this service cannot use: {summary}", status=status
         )
+
+
+class CampaignNotFoundError(ApplicationError):
+    """No campaign carries that id. The id came from a URL, so this is a 404."""
+
+    def __init__(self, campaign_id: object) -> None:
+        super().__init__(f"no campaign {campaign_id}")
+
+
+class CampaignAlreadyImportedError(ApplicationError):
+    """That tracker campaign is already open here.
+
+    A second local copy would give one flow two editors.
+    """
+
+    def __init__(self, keitaro_campaign_id: object) -> None:
+        super().__init__(f"campaign {keitaro_campaign_id} in the tracker is already imported")
+
+
+class StreamNotFoundError(ApplicationError):
+    """This campaign has no such flow.
+
+    Also the answer for another campaign's flow: the lookup is scoped, so it cannot tell the
+    two apart — and should not.
+    """
+
+    def __init__(self, stream_id: object) -> None:
+        super().__init__(f"this campaign has no flow {stream_id}")
+
+
+class DraftAlreadyOpenError(ApplicationError):
+    """A flow already has a live draft. Losing this race means re-reading and editing that one."""
+
+    def __init__(self, stream_id: object) -> None:
+        super().__init__(f"flow {stream_id} already has a draft being edited or pushed")
+
+
+class DraftStatusChangedError(ApplicationError):
+    """The draft was not in the status the caller expected, so somebody else moved it first."""
+
+    def __init__(self, expected: DraftStatus, found: DraftStatus) -> None:
+        # `.value` on both: this message reaches a problem+json body, and `DraftStatus.PUSHING`
+        # is Python's word for it rather than the API's.
+        super().__init__(
+            f"the draft is {found.value} and not {expected.value}: another request moved it"
+        )
+
+
+class PushAttemptSettledError(ApplicationError):
+    """This attempt is already closed — a phase 3 returning after somebody took the push over."""
+
+    def __init__(self, attempt_id: object) -> None:
+        super().__init__(f"push attempt {attempt_id} is already closed")
