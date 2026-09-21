@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 import { OfferCombobox, type Offer } from '@/entities/offer'
 import { useDraftOps } from '@/features/stream-draft'
+import { SyncOffersButton } from '@/features/sync-offers'
 import { Button } from '@/shared/ui/button'
 import { TableCell, TableRow } from '@/shared/ui/table'
 
@@ -36,12 +37,13 @@ export function AddOfferRow({ campaignId, streamId, streamName, status }: AddOff
             value={offer}
             onChange={setOffer}
             disabled={draft.staging}
+            empty={<SyncOffersButton />}
             className="max-w-xl"
           />
           <Button
             type="button"
             disabled={offer === null || draft.staging}
-            aria-label={`Add an offer to ${streamName}`}
+            aria-label={`Добавить оффер в ${streamName}`}
             onClick={() => {
               if (offer === null) return
               draft.add(offer)

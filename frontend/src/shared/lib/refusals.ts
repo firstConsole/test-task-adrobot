@@ -35,7 +35,7 @@ export function readRefusals<Field extends string>(
   if (problem === null) {
     return {
       fields: [],
-      message: problemMessage(error, 'The API could not be reached.'),
+      message: problemMessage(error, 'До API не достучаться.'),
       correlationId: null,
     }
   }

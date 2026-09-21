@@ -53,7 +53,7 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
     return (
       <section className="space-y-4" aria-busy>
         <p className="sr-only" role="status">
-          Reading the flows…
+          Читаю потоки…
         </p>
         <Frame>
           {SKELETON_GROUPS.map((group) => (
@@ -68,7 +68,7 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
     const correlationId = streams.error instanceof ApiError ? streams.error.correlationId : null
     return (
       <p role="alert" className="text-destructive text-sm">
-        {problemMessage(streams.error, 'The flows could not be read.')}
+        {problemMessage(streams.error, 'Потоки не удалось прочитать.')}
         {correlationId === null ? null : ` (${correlationId})`}
       </p>
     )
@@ -83,12 +83,12 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
           to={ROUTES.campaignList}
           className="hover:text-foreground underline-offset-4 hover:underline"
         >
-          Campaigns
+          Кампании
         </Link>
         <span aria-hidden>/</span>
         <span className="text-foreground font-medium">{campaign.name}</span>
         <span aria-hidden>/</span>
-        <span>Keitaro streams</span>
+        <span>потоки в Keitaro</span>
       </nav>
 
       {campaign.setup_status === 'ready' ? null : (
@@ -99,13 +99,13 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
           <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
           <div className="space-y-2">
             <p>
-              This campaign's flows were never finished in the tracker.
+              Потоки этой кампании в трекере так и не достроены.
               {campaign.setup_failure === null || campaign.setup_failure === undefined
                 ? ''
                 : ` ${campaign.setup_failure}`}{' '}
               {canFinishSetup(campaign)
-                ? 'Finishing it creates whatever Keitaro is missing and leaves everything else alone.'
-                : 'It was built somewhere else, so there is no record here of what its flows were meant to be — they can be edited, but not rebuilt.'}
+                ? 'FINISH SETUP создаст то, чего не хватает в Keitaro, и не тронет остальное.'
+                : 'Она построена не здесь, поэтому записи о том, какими её потоки задумывались, у нас нет: править их можно, достроить нельзя.'}
             </p>
             {canFinishSetup(campaign) ? <FinishSetupButton campaignId={campaignId} /> : null}
           </div>
@@ -127,7 +127,7 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
             here anyway. */}
         {campaign.synced_at === null || campaign.synced_at === undefined ? null : (
           <span className="text-muted-foreground text-xs">
-            mirrored {relativeTime(campaign.synced_at)}
+            зеркало обновлено {relativeTime(campaign.synced_at)}
           </span>
         )}
         {/* The day and the zone are the tracker's, not this browser's: "clicks today" means
@@ -135,8 +135,8 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
         {numbers === null ? null : (
           <span className="text-muted-foreground text-xs">
             {numbers.available
-              ? `clicks today — ${numbers.day} ${numbers.timezone}${numbers.stale ? ', last read that worked' : ''}`
-              : `no clicks today: ${numbers.unavailableReason ?? 'the tracker would not build the report'}`}
+              ? `кликов сегодня — ${numbers.day} ${numbers.timezone}${numbers.stale ? ', последнее удачное чтение' : ''}`
+              : `кликов сегодня нет: ${numbers.unavailableReason ?? 'трекер не собрал отчёт'}`}
           </span>
         )}
       </div>
@@ -149,8 +149,8 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
                 colSpan={COLUMN_COUNT}
                 className="text-muted-foreground p-6 text-center text-sm"
               >
-                This campaign has no flows in the mirror yet. FETCH STREAMS FROM KT will read
-                them again from the tracker.
+                В зеркале у этой кампании пока нет потоков. FETCH STREAMS FROM KT прочитает
+                их из трекера заново.
               </td>
             </tr>
           </tbody>

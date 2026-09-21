@@ -46,7 +46,7 @@ export function CampaignRow({ campaign }: { campaign: Campaign }) {
 
       <TableCell className="space-x-1.5">
         {campaign.setup_status === 'ready' ? null : (
-          <Badge className="border-amber-300 bg-amber-50 text-amber-900">unfinished</Badge>
+          <Badge className="border-amber-300 bg-amber-50 text-amber-900">не достроена</Badge>
         )}
         {campaign.state === 'active' ? null : (
           <Badge variant="destructive">{campaign.state}</Badge>

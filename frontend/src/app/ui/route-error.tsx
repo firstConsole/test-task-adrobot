@@ -10,17 +10,17 @@ export function RouteError() {
 
   return (
     <section>
-      <h2 className="text-lg font-medium">{problem?.title ?? 'Something went wrong'}</h2>
+      <h2 className="text-lg font-medium">{problem?.title ?? 'Что-то пошло не так'}</h2>
       <p className="text-muted-foreground mt-1 text-sm">
-        {problem?.detail ?? (error instanceof Error ? error.message : 'The screen could not be drawn.')}
+        {problem?.detail ?? (error instanceof Error ? error.message : 'Экран не удалось отрисовать.')}
       </p>
       {problem?.correlation_id != null && (
         <p className="text-muted-foreground mt-1 text-xs">
-          Quote <code>{problem.correlation_id}</code> in a bug report.
+          Укажите <code>{problem.correlation_id}</code> в баг-репорте.
         </p>
       )}
       <Button asChild variant="outline" size="sm" className="mt-4">
-        <Link to={ROUTES.campaignList}>Back to the campaigns</Link>
+        <Link to={ROUTES.campaignList}>К кампаниям</Link>
       </Button>
     </section>
   )

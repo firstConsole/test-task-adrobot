@@ -12,9 +12,9 @@ export const importCampaignSchema = z.object({
   keitaro_campaign_id: z
     .string()
     .trim()
-    .regex(/^\d+$/, "A campaign id is the number in the tracker's own URL — 93212.")
+    .regex(/^\d+$/, 'Id кампании — это число из её адреса в трекере, например 93212.')
     .transform(Number)
-    .refine((id) => id > 0, 'There is no campaign 0.'),
+    .refine((id) => id > 0, 'Кампании 0 не существует.'),
 })
 
 export type ImportCampaignValues = z.output<typeof importCampaignSchema>

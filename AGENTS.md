@@ -157,8 +157,20 @@ advertising budget.
 
 ## Style
 
-* English in code, docstrings, OpenAPI and error messages. Russian only in the README and
-  in pull request descriptions.
+* English in code, docstrings, OpenAPI and the API's error messages. Russian in the README,
+  in pull request descriptions, and in **everything the browser shows a person** — headings,
+  field labels, hints, empty states, warnings, toasts and the accessible names behind them.
+  The people who use this tool read Russian; the people who read this code do not have to.
+* **The command buttons are not prose and stay as they are.** `PUSH TO KT`, `CANCEL`,
+  `BRING BACK`, `REMOVE`, `ADD`, `FETCH STREAMS FROM KT`, `VIEW IN KT`, `FINISH SETUP` and
+  the rest are quotations from the reference tool a reviewer holds this screen up against.
+  So is Keitaro's own vocabulary where it appears as data: `Flow 2`, `stream_id`, `disabled`,
+  and the `None` a flow with no filters is printed with.
+* **A refusal the API wrote reaches the screen in the API's own words**, which are English:
+  the frontend renders `detail` rather than mapping it to a message of its own. The seam is
+  deliberate — the alternatives are a translation table on the client, which goes stale
+  silently, or Russian strings in the API, which puts the wording of a refusal somewhere
+  other than where the refusal is decided.
 * **A docstring explains a decision.** If it restates the function's name, delete it.
   Module, package, dunder and `__init__` docstrings are not required and mostly should not
   exist.

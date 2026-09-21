@@ -29,7 +29,7 @@ export function DraftActions({ campaignId, stream }: DraftActionsProps) {
         type="button"
         size="sm"
         disabled={!stream.can_push || draft.working}
-        aria-label={`Push ${stream.name} to Keitaro`}
+        aria-label={`Отправить ${stream.name} в Keitaro`}
         onClick={draft.push}
       >
         <UploadIcon />
@@ -41,7 +41,7 @@ export function DraftActions({ campaignId, stream }: DraftActionsProps) {
         size="sm"
         variant="outline"
         disabled={draft.working}
-        aria-label={`Throw away the staged edits of ${stream.name}`}
+        aria-label={`Выбросить черновик потока ${stream.name}`}
         onClick={draft.discard}
       >
         <XIcon />

@@ -1,6 +1,6 @@
 import { cn } from 'cn'
 import { ChevronsUpDownIcon } from 'lucide-react'
-import type { Ref } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { useState } from 'react'
 
 import { ApiError } from '@/shared/api/client'
@@ -32,6 +32,15 @@ type OfferComboboxProps = {
   id?: string
   /** The form library's, so that a server refusal naming this field can put the focus on it. */
   ref?: Ref<HTMLButtonElement>
+  /**
+   * What to offer when the search comes back with nothing — in practice the button that
+   * reads the catalogue from Keitaro.
+   *
+   * A slot and not the button itself: refreshing the catalogue is a mutation, mutations live
+   * in `features/`, and this component is an entity. Whoever mounts it is on a layer that may
+   * reach both.
+   */
+  empty?: ReactNode
   className?: string
 }
 
@@ -51,9 +60,10 @@ export function OfferCombobox({
   onBlur,
   disabled = false,
   invalid = false,
-  placeholder = 'Select an offer…',
+  placeholder = 'Выберите оффер…',
   id,
   ref,
+  empty,
   className,
 }: OfferComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -102,23 +112,34 @@ export function OfferCombobox({
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-(--radix-popover-trigger-width) p-0">
-        <Command shouldFilter={false} label="Offer catalogue">
-          <CommandInput value={term} onValueChange={setTerm} placeholder="Search by id or name…" />
+        <Command shouldFilter={false} label="Каталог офферов">
+          <CommandInput value={term} onValueChange={setTerm} placeholder="Поиск по id или имени…" />
           <CommandList>
             {search.isError ? (
               <p role="status" className="text-destructive px-3 py-6 text-center text-sm">
-                {search.error instanceof ApiError ? search.error.message : 'Search failed'}
+                {search.error instanceof ApiError ? search.error.message : 'Поиск не удался'}
               </p>
             ) : (
               <>
                 {searching ? (
                   <p role="status" className="text-muted-foreground py-6 text-center text-sm">
-                    Searching…
+                    Ищу…
                   </p>
                 ) : null}
 
                 {!searching && offers.length === 0 ? (
-                  <CommandEmpty>No results found</CommandEmpty>
+                  <CommandEmpty>
+                    {/* Two different facts, and telling them apart is the whole point: with
+                        no term typed this endpoint answers SHOW ALL OFFERS, so nothing back
+                        means the local catalogue is empty — not that the tracker has no such
+                        offer. One of them is fixed by pressing a button. */}
+                    <span className="block">
+                      {settled === ''
+                        ? 'Каталог пуст — из Keitaro ещё ничего не читали'
+                        : 'Ничего не нашлось'}
+                    </span>
+                    {empty === undefined ? null : <span className="mt-3 block">{empty}</span>}
+                  </CommandEmpty>
                 ) : null}
 
                 {offers.length > 0 ? (

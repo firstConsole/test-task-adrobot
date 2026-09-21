@@ -4,9 +4,9 @@ import type { Stream } from '@/entities/stream'
 
 /** The three kinds of change, each with a mark, a colour and a word — never colour alone. */
 const CHANGE = {
-  added: { mark: '+', label: 'added', tone: 'text-emerald-700' },
-  removed: { mark: '−', label: 'removed', tone: 'text-red-700' },
-  brought_back: { mark: '↺', label: 'brought back', tone: 'text-amber-800' },
+  added: { mark: '+', label: 'добавлен', tone: 'text-emerald-700' },
+  removed: { mark: '−', label: 'убран', tone: 'text-red-700' },
+  brought_back: { mark: '↺', label: 'возвращён', tone: 'text-amber-800' },
 } as const
 
 type ChangeKind = keyof typeof CHANGE
@@ -61,8 +61,10 @@ export function DiffSummary({ stream }: { stream: Stream }) {
   return (
     <div className="mt-2 space-y-1 text-xs font-normal">
       <p className="text-amber-900">
-        Push will write <span className="font-semibold tabular-nums">{shares}</span> to Keitaro
-        {disabled === 0 ? null : `, and ${String(disabled)} row${disabled === 1 ? '' : 's'} as disabled`}.
+        PUSH запишет в Keitaro <span className="font-semibold tabular-nums">{shares}</span>
+        {/* Отключённые строки счётом, а не «N строк»: три формы множественного числа ради
+            одной подписи — это функция, которой больше негде пригодиться. */}
+        {disabled === 0 ? null : `, плюс отключённых строк: ${String(disabled)}`}.
       </p>
 
       {changed.length === 0 && diff.share_changes.length === 0 ? null : (
@@ -75,7 +77,7 @@ export function DiffSummary({ stream }: { stream: Stream }) {
             <span key={change.offer_id} className="text-muted-foreground tabular-nums">
               #{String(change.offer_id)} {String(change.was)}
               <span aria-hidden> → </span>
-              <span className="sr-only"> becomes </span>
+              <span className="sr-only"> станет </span>
               {String(change.now)}
             </span>
           ))}

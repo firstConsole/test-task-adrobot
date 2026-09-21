@@ -32,18 +32,18 @@ export function campaignCreatedToast(campaign: Campaign, country: string): void 
   )
 
   if (campaign.setup_status === 'ready') {
-    toast.success(`${campaign.name} is in Keitaro.`, {
-      description: `Campaign ${String(campaign.keitaro_campaign_id)}: Flow 1 catches ${country} and sends it to google.com, Flow 2 rotates one offer at 100%.`,
+    toast.success(`${campaign.name} — в Keitaro.`, {
+      description: `Кампания ${String(campaign.keitaro_campaign_id)}: Flow 1 ловит ${country} и уводит на google.com, Flow 2 крутит один оффер на 100%.`,
       action: link,
       duration: LINGER_MS,
     })
     return
   }
 
-  toast.warning(`${campaign.name} was created, but its flows are not finished.`, {
+  toast.warning(`${campaign.name} создана, но её потоки не достроены.`, {
     description:
       campaign.setup_failure ??
-      'The tracker took the campaign and then refused a flow. FETCH STREAMS FROM KT to see what it has.',
+      'Трекер принял кампанию и отказал потоку. FETCH STREAMS FROM KT покажет, что у него есть.',
     action: link,
     duration: LINGER_MS,
   })

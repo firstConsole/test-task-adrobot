@@ -19,17 +19,17 @@ describe('the geo the offer will never be shown', () => {
   })
 
   it('warns when the offer is set up for exactly the country Flow 1 takes away', () => {
-    expect(geoWarning('MX', anOffer(['mx']))).toContain('would sit on 100% of nothing')
+    expect(geoWarning('MX', anOffer(['mx']))).toContain('100% ничего')
   })
 
   it('names what is left when the offer covers more than that one country', () => {
     expect(geoWarning('MX', anOffer(['MX', 'PL', 'ES']))).toBe(
-      'Oxys covers MX, PL, ES, and Flow 1 catches MX first and redirects it to google.com. Only PL, ES would reach the offer.',
+      'Oxys закрывает MX, PL, ES, а Flow 1 ловит MX первым и уводит на google.com. До оффера дойдут только PL, ES.',
     )
   })
 
   it('ignores what the tracker keeps in that array that is not a country', () => {
     expect(geoWarning('MX', anOffer(['-']))).toBeNull()
-    expect(geoWarning('MX', anOffer(['MX', '-']))).toContain('100% of nothing')
+    expect(geoWarning('MX', anOffer(['MX', '-']))).toContain('100% ничего')
   })
 })
