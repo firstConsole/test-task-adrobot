@@ -98,6 +98,14 @@ export default tseslint.config(
   },
 
   {
+    // Fixtures and doubles for the whole tree. Building an entity object for a widget's test
+    // means reaching across the layer graph, and nothing here is ever imported by code that
+    // ships. The test files themselves are left inside the graph.
+    files: ['src/shared/test/**'],
+    rules: { 'boundaries/dependencies': 'off' },
+  },
+
+  {
     // Vendored from the shadcn registry. Left as the registry ships it, so that
     // `shadcn add --diff` stays readable when a component is updated.
     files: ['src/shared/ui/**'],
