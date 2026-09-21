@@ -1,9 +1,9 @@
-"""ADD, REMOVE and BRING BACK, against the campaign from the video.
+"""ADD, REMOVE, BRING BACK and CANCEL, against the campaign from the video.
 
 The arithmetic itself belongs to `tests/domain/`; what is asserted here is the part only a
 scenario can be held to — when a draft is opened and what it is seeded with, that a batch
-is all or nothing, and that the flow a client is answered with is the flow a reload would
-fetch.
+is all or nothing, that the flow a client is answered with is the flow a reload would
+fetch, and what CANCEL does and does not take with it.
 """
 
 from __future__ import annotations
@@ -18,12 +18,14 @@ from adrobot.application.errors import (
     StreamDoesNotRotateOffersError,
     StreamNotFoundError,
 )
-from adrobot.application.use_cases.edit_draft import EditDraft
+from adrobot.application.use_cases.edit_draft import DiscardDraft, EditDraft
 from adrobot.application.use_cases.editor import GetEditorView
+from adrobot.application.use_cases.pin_offer import SetOfferPin
 from adrobot.domain.diff import snapshot_hash
 from adrobot.domain.draft import DraftOperationKind, DraftStatus
 from adrobot.domain.errors import OfferAlreadyInStreamError, OfferNotRemovedError
 from adrobot.domain.ids import CampaignId, KeitaroStreamId, OfferId
+from adrobot.domain.values import Share
 from tests.fakes import FIRST_STREAM_ID, REFERENCE_OFFERS
 from tests.helpers import (
     given_mirrored_campaign,
@@ -219,3 +221,101 @@ async def test_one_transaction_and_never_a_word_to_the_tracker(world: FakeWorld)
 
     assert world.uow.blocks == 1
     assert world.admin.calls == [], "staging an edit is ours alone until PUSH is pressed"
+
+
+# --- CANCEL ------------------------------------------------------------------------------
+
+
+async def test_cancelling_puts_the_tracker_s_own_shares_back_unnormalised(
+    world: FakeWorld,
+) -> None:
+    """The strongest thing CANCEL has to promise: the recalculation goes with the edit.
+
+    This flow summed to 50 before anything was touched. The first edit divided the whole and
+    made it sum to 100; cancelling has to undo that too, or the screen would be showing
+    numbers this service invented and nobody asked for.
+    """
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    edited = await given_staged_draft(world, campaign_id, stream_id, operation(ADD, ADDED))
+    assert on_screen(edited) == [(ADDED, 34, False), (OLDEST, 33, False), (NEWEST, 33, False)]
+
+    flow = await DiscardDraft(uow=world.uow)(campaign_id=campaign_id, stream_id=stream_id)
+
+    assert on_screen(flow) == [(OLDEST, 25, False), (NEWEST, 25, False)]
+    assert (flow.dirty, flow.can_push, flow.diff) == (False, False, None)
+
+
+async def test_a_pin_survives_the_cancel(world: FakeWorld) -> None:
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    await SetOfferPin(uow=world.uow)(
+        campaign_id=campaign_id, stream_id=stream_id, offer_id=NEWEST, share=Share(25)
+    )
+    await given_staged_draft(world, campaign_id, stream_id, operation(ADD, ADDED))
+
+    flow = await DiscardDraft(uow=world.uow)(campaign_id=campaign_id, stream_id=stream_id)
+
+    assert {int(row.offer_id): row.pinned_share for row in flow.rows} == {OLDEST: None, NEWEST: 25}
+
+
+async def test_cancelling_a_flow_with_nothing_staged_says_nothing(world: FakeWorld) -> None:
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+
+    flow = await DiscardDraft(uow=world.uow)(campaign_id=campaign_id, stream_id=stream_id)
+
+    assert not flow.dirty
+    assert on_screen(flow) == [(OLDEST, 25, False), (NEWEST, 25, False)]
+
+
+async def test_the_next_edit_after_a_cancel_opens_a_draft_of_its_own(world: FakeWorld) -> None:
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    await given_staged_draft(world, campaign_id, stream_id, operation(ADD, ADDED))
+    discarded = await locked_view(world.uow, campaign_id, stream_id)
+    assert discarded.draft is not None
+    first = discarded.draft.id
+    await DiscardDraft(uow=world.uow)(campaign_id=campaign_id, stream_id=stream_id)
+
+    await given_staged_draft(world, campaign_id, stream_id, operation(REMOVE, OLDEST))
+
+    reopened = await locked_view(world.uow, campaign_id, stream_id)
+    assert reopened.draft is not None
+    assert reopened.draft.id != first, "the discarded one is closed, not reused"
+
+
+async def test_a_draft_in_flight_is_not_cancellable(world: FakeWorld) -> None:
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    await given_staged_draft(world, campaign_id, stream_id, operation(ADD, ADDED))
+    view = await locked_view(world.uow, campaign_id, stream_id)
+    assert view.draft is not None
+    async with world.uow.begin() as transaction:
+        await transaction.drafts.change_status(
+            view.draft.id, was=DraftStatus.OPEN, becomes=DraftStatus.PUSHING
+        )
+
+    with pytest.raises(DraftBeingPushedError):
+        await DiscardDraft(uow=world.uow)(campaign_id=campaign_id, stream_id=stream_id)
+
+
+async def test_cancelling_another_campaign_s_flow_is_not_found(world: FakeWorld) -> None:
+    _, stream_id = await given_mirrored_campaign(world)
+
+    with pytest.raises(StreamNotFoundError):
+        await DiscardDraft(uow=world.uow)(campaign_id=CampaignId(uuid4()), stream_id=stream_id)
+
+
+async def test_cancelling_a_redirect_flow_is_refused(world: FakeWorld) -> None:
+    campaign_id, _ = await given_mirrored_campaign(world)
+
+    with pytest.raises(StreamDoesNotRotateOffersError):
+        await DiscardDraft(uow=world.uow)(campaign_id=campaign_id, stream_id=REDIRECT_FLOW)
+
+
+async def test_cancelling_costs_one_transaction_and_no_tracker_call(world: FakeWorld) -> None:
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    await given_staged_draft(world, campaign_id, stream_id, operation(ADD, ADDED))
+    world.uow.blocks = 0
+    world.admin.calls.clear()
+
+    await DiscardDraft(uow=world.uow)(campaign_id=campaign_id, stream_id=stream_id)
+
+    assert world.uow.blocks == 1
+    assert world.admin.calls == []

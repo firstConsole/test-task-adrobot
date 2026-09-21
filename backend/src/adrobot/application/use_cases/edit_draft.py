@@ -125,3 +125,46 @@ class EditDraft:
                 transaction,
                 await transaction.streams.lock(campaign_id=campaign_id, stream_id=stream_id),
             )
+
+
+class DiscardDraft:
+    """CANCEL: throw the staged edits away and leave the flow reading as the tracker holds it."""
+
+    def __init__(self, *, uow: UnitOfWork) -> None:
+        self._uow = uow
+
+    async def __call__(
+        self, *, campaign_id: CampaignId, stream_id: KeitaroStreamId
+    ) -> StreamEditorView:
+        """Close this flow's draft, or answer with the flow when there is none to close.
+
+        Three things survive, and each is a decision rather than an omission:
+
+        *   **The pins.** They live in the mirror precisely so that cancelling does not take
+            them, which is what the reference tool does and the reason `offer_pins` is a
+            table of its own.
+        *   **The tracker's own shares, unnormalised.** A flow that summed to 50 before the
+            first edit sums to 50 again afterwards. Cancelling undoes the recalculation
+            along with the edit that caused it; leaving the flow at 100 would mean this
+            service had quietly written something nobody asked for.
+        *   **The draft row itself.** It is closed, never deleted — a push attempt points at
+            it, and an audit trail with the middle torn out is not one.
+
+        Silent on a flow with nothing staged: CANCEL is the same button pressed twice, and a
+        second press is not a state worth a status code.
+        """
+        async with self._uow.begin() as transaction:
+            view = await transaction.streams.lock(campaign_id=campaign_id, stream_id=stream_id)
+            refuse_a_flow_that_rotates_nothing(view.stream)
+            # Refused rather than obeyed: a push in flight has already told the tracker what
+            # to hold, and discarding the draft behind it would leave nothing on this screen
+            # that explains the state Keitaro is about to be in.
+            refuse_a_draft_in_flight(stream_id, view.draft)
+            if view.draft is not None:
+                await transaction.drafts.change_status(
+                    view.draft.id, was=DraftStatus.OPEN, becomes=DraftStatus.DISCARDED
+                )
+            return await rendered(
+                transaction,
+                await transaction.streams.lock(campaign_id=campaign_id, stream_id=stream_id),
+            )
