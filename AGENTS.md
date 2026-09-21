@@ -19,6 +19,13 @@ this; run `make help` for the list.
 looks for `backend/src/src/adrobot`. `lock`, `check`, `install` and `sync` are fine with
 `-C`.
 
+**Three committed files are generated and must never be edited by hand.**
+`docs/adrobot-openapi.json` comes from the routers (`make openapi`),
+`frontend/src/shared/lib/countries.gen.ts` from `domain/geo.py` (`make countries`), and
+`frontend/src/shared/api/schema.gen.ts` from the first of those (`npm run api:types`). CI
+runs all three again and fails on any diff, so a hand edit is reverted by the next `make`
+and red before that.
+
 Configuration is read from the environment only. There is no `env_file` in `Settings`:
 the repository keeps `.env` at its root while every backend tool runs from `backend/`, so
 no relative path would be right from both. To run the service outside compose:
