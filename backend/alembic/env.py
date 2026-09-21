@@ -26,16 +26,19 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from adrobot.infrastructure.db import (
+    models,  # noqa: F401  # imported so its tables reach the metadata
+)
+from adrobot.infrastructure.db.base import Base
 from adrobot.logging import configure_logging
 from adrobot.settings import Settings
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
 
-# Nothing to autogenerate against yet. Sub-stage 5.1 writes
-# infrastructure/db/base.py and points this at `Base.metadata`; until then `--autogenerate`
-# would confidently propose dropping every table it finds.
-target_metadata = None
+# `--autogenerate` compares the database against this. A table only appears in it once its
+# module has been imported, which is what the models import above is for.
+target_metadata = Base.metadata
 
 _settings = Settings()
 

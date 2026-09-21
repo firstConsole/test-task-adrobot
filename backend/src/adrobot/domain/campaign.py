@@ -33,6 +33,17 @@ class CampaignRotation(Enum):
     WEIGHT = "weight"
 
 
+class CampaignSetupStatus(Enum):
+    """How far part 1 got with this campaign.
+
+    The tracker cannot answer it: the campaign exists there either way, and only a flow
+    that was never created tells the two apart.
+    """
+
+    READY = "ready"
+    NEEDS_ATTENTION = "needs_attention"
+
+
 class CostType(Enum):
     """The three cost models the write schema accepts, out of the eight it reads back."""
 

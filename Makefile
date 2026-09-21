@@ -14,7 +14,7 @@ POETRY  ?= poetry
 RUN     := $(POETRY) run
 
 .DEFAULT_GOAL := help
-.PHONY: help install hooks up down migrate revision test cov lint typecheck imports probe
+.PHONY: help install hooks up down migrate revision test fast cov lint typecheck imports probe
 
 help: ## Show this list
 	@grep -hE '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -59,8 +59,15 @@ revision: ## Create a migration: make revision REV=0002 M="draft tables"
 
 # --- checks ---------------------------------------------------------------------------
 
+# The database tests take themselves off with a visible reason when PostgreSQL is
+# unreachable, so this is green on a fresh clone; `make up` is what turns them on. They read
+# TEST_DATABASE_URL and not ADROBOT_DATABASE_URL, because the latter names the compose
+# service `db`, which resolves only inside the compose network.
 test: ## Run the test suite
 	cd $(BACKEND) && $(RUN) pytest
+
+fast: ## Run everything but the database tests
+	cd $(BACKEND) && $(RUN) pytest -m 'not db'
 
 lint: ## Lint and check formatting
 	cd $(BACKEND) && $(RUN) ruff check .
@@ -69,11 +76,9 @@ lint: ## Lint and check formatting
 typecheck: ## Type-check src, tests, alembic and scripts under mypy strict
 	cd $(BACKEND) && $(RUN) mypy
 
-# Red until sub-stage 4.2, and deliberately not chained into any other target: the three
-# contracts name adrobot.domain, adrobot.application and
-# infrastructure/keitaro/schemas.py, and one erroring contract aborts the whole run. Until
-# those packages exist this prints `Module 'adrobot.domain' does not exist.` and exits 1.
-imports: ## Check the layer boundaries (red until stage 4.2)
+# Deliberately not chained into any other target: one erroring contract aborts the whole
+# run, so a rename mid-refactor would hide the other two. CI runs it as its own job.
+imports: ## Check the layer boundaries
 	cd $(BACKEND) && $(RUN) lint-imports --no-logo --no-cache
 
 # --- the tracker ----------------------------------------------------------------------
@@ -96,7 +101,7 @@ probe: ## Probe the live Keitaro API (stage 2): make probe P="groups offers"
 # lower bar. Both are red until the packages they name exist — `coverage report` over an
 # `--include` that matches nothing prints "No data to report." and exits 1, which is the
 # right answer and not a reason to soften the gate.
-cov: ## Run the suite under coverage and enforce both gates (red until stage 3)
+cov: ## Run the suite under coverage and enforce both gates
 	cd $(BACKEND) && $(RUN) pytest --cov --cov-report=term-missing
 	cd $(BACKEND) && $(RUN) coverage report --include='src/adrobot/domain/shares.py' --fail-under=100
 	cd $(BACKEND) && $(RUN) coverage report --include='src/adrobot/domain/*,src/adrobot/application/*' --fail-under=90

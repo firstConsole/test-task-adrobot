@@ -1,12 +1,8 @@
-# Three jobs, one per kind of failure, so a red run says which kind without being opened.
+# Four jobs, one per kind of failure, so a red run says which kind without being opened.
 #
-# PLAN-BACKEND §11 describes six. The three that are missing are missing because they
-# cannot pass yet, and a job that is allowed to fail is a job nobody reads:
+# PLAN-BACKEND §11 describes six. The two that are missing are missing because they cannot
+# pass yet, and a job that is allowed to fail is a job nobody reads:
 #
-#   imports         the three import-linter contracts name adrobot.domain,
-#                   adrobot.application and infrastructure/keitaro/schemas.py. None of
-#                   those packages exists before stage 4, and one erroring contract aborts
-#                   the whole run — so this job joins the workflow in the stage-4 PR.
 #   frontend        there is no frontend/ until stage 9.
 #   compose-smoke   it is specified as "the literal commands from the README", and the
 #                   README is written at 12.1. The stack itself already comes up; what is
@@ -57,16 +53,65 @@ jobs:
         working-directory: backend
         run: poetry run mypy
 
-  test:
-    name: test
+  imports:
+    name: imports
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/python-env
-      # No `services: postgres` yet. Every test today runs without one, and a service
-      # container nothing connects to is a minute of start-up per run that proves nothing.
-      # Stage 5.9 adds it in the commit that writes the first test needing it.
+      # The three layer contracts, which no other job can see: the domain ring importing a
+      # third-party package, or a use case reaching infrastructure, is a design failure that
+      # type-checks and passes every test.
+      - name: lint-imports
+        working-directory: backend
+        run: poetry run lint-imports --no-logo --no-cache
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The tag compose runs, spelled the same way, because "it passed on my machine" has to
+    # mean the same server. These steps run on the runner itself and not in a container, so
+    # `db` is not a name here — which is why the database fixtures read TEST_DATABASE_URL and
+    # not ADROBOT_DATABASE_URL.
+    services:
+      postgres:
+        image: docker.io/library/postgres:18-trixie
+        env:
+          POSTGRES_USER: adrobot
+          POSTGRES_PASSWORD: adrobot
+          POSTGRES_DB: adrobot
+        ports:
+          - 5432:5432
+        # `-h 127.0.0.1` rather than the default socket check, and compose's own numbers:
+        # initdb runs a local server before the real one starts, so a socket `pg_isready`
+        # can pass a second before the port is listening.
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U adrobot -d adrobot"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-start-period 15s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/python-env
+      # The schema the tests run against is the one the migrations produce, built the way
+      # production builds it rather than from the models.
+      - name: alembic upgrade head
+        working-directory: backend
+        env:
+          ADROBOT_ENV: dev
+          ADROBOT_DATABASE_URL: postgresql+asyncpg://adrobot:adrobot@127.0.0.1:5432/adrobot
+          ADROBOT_ACCESS_TOKEN: ci-access-token-not-a-secret
+          ADROBOT_KEITARO_BASE_URL: https://tracker.invalid/admin_api/v1
+          ADROBOT_KEITARO_API_KEY: ci-not-a-real-keitaro-admin-api-key
+          ADROBOT_KEITARO_PUBLIC_BASE_URL: https://tracker.invalid
+        run: poetry run alembic upgrade head
+      # `CI` is exported by GitHub Actions and the postgres fixture reads it: a service
+      # container that never came up must fail this job rather than skip thirteen tests.
       - name: pytest
         working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql+asyncpg://adrobot:adrobot@127.0.0.1:5432/adrobot
         run: poetry run pytest
