@@ -1,15 +1,13 @@
-# Six jobs, one per kind of failure, so a red run says which kind without being opened.
+# Seven jobs, one per kind of failure, so a red run says which kind without being opened.
 #
 # PLAN-BACKEND §11 describes six of them; `generated` is one it does not, because two of the
 # files the frontend is built from — its API types and its country list — are committed here
 # and generated from the backend, and only the backend can say whether they are still true.
 #
-# Still missing, because it cannot pass yet and a job that is allowed to fail is a job
-# nobody reads:
-#
-#   compose-smoke   it is specified as "the literal commands from the README", and the
-#                   README is written at 12.1. The stack itself already comes up; what is
-#                   missing is the thing the job is supposed to be checking.
+# `compose-smoke` is the seventh, added at 12.6 once there was a README to be literal about:
+# it runs scripts/verify-fresh.sh, which clones this commit into a temporary directory and
+# brings it up with nothing but the two commands the README gives a reviewer. It is the only
+# job here that reads the Dockerfiles, the compose file and .env.example at all.
 
 name: CI
 
@@ -171,3 +169,15 @@ jobs:
         run: npm run test
       - name: vite build
         run: npm run build
+
+  compose-smoke:
+    name: compose-smoke
+    runs-on: ubuntu-latest
+    # The frontend image builds inside this job, so it is the slowest one here by a margin.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # No setup steps on purpose: the point is that a machine with docker and nothing else
+      # can run this project, so anything installed here would be a hole in the claim.
+      - name: the two commands from the README, against a clone of this commit
+        run: scripts/verify-fresh.sh
