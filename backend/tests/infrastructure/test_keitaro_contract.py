@@ -114,11 +114,20 @@ class _AnythingTracker:
         return {"id": CAMPAIGN_ID, "name": "Anything"}
 
 
+UNPUBLISHED = {"GET /settings"}
+"""The one path this adapter calls that the published schema has never declared.
+
+Deliberate, and narrow: the tracker's own time zone is not in the document and not derivable
+from anything that is, and a build without the path answers 404 — which
+`application/time_zone.py` reads as "the configured zone stands" rather than as a failure.
+"""
+
+
 async def test_every_path_the_adapter_calls_is_one_the_tracker_publishes() -> None:
     answers = _AnythingTracker()
     transport = _transport(answers)
     admin = HttpKeitaroAdmin(transport, zone=MADRID)
-    reports = HttpKeitaroReports(transport, timezone="Europe/Madrid")
+    reports = HttpKeitaroReports(transport)
 
     await admin.list_reference_data()
     await admin.create_campaign_group("AD Robot")
@@ -133,8 +142,9 @@ async def test_every_path_the_adapter_calls_is_one_the_tracker_publishes() -> No
     await admin.list_campaign_streams(CAMPAIGN_ID)
     await admin.replace_stream_offers(STREAM_ID, ())
     await admin.list_offers()
-    await reports.clicks_by_stream(CAMPAIGN_ID, A_DAY)
-    await reports.clicks_by_offer(CAMPAIGN_ID, A_DAY)
+    await admin.get_time_zone()
+    await reports.clicks_by_stream(CAMPAIGN_ID, A_DAY, timezone="Europe/Madrid")
+    await reports.clicks_by_offer(CAMPAIGN_ID, A_DAY, timezone="Europe/Madrid")
 
     published = _spec()["paths"]
     invented = sorted(
@@ -143,8 +153,12 @@ async def test_every_path_the_adapter_calls_is_one_the_tracker_publishes() -> No
         if method.lower() not in published.get(path, {})
     )
 
-    assert not invented, f"the schema publishes no such endpoint: {invented}"
-    assert len(set(answers.asked)) >= 10, "and every method of both ports was exercised"
+    # Exactly one, and it is the one this service knows it is guessing about. An equality
+    # and not `not invented`: the schema is the contract everything else is written
+    # against, and a second undocumented path added later should have to be argued for
+    # here rather than inherited from an assertion that had already been relaxed.
+    assert invented == sorted(UNPUBLISHED), f"the schema publishes no such endpoint: {invented}"
+    assert len(set(answers.asked)) >= 11, "and every method of both ports was exercised"
 
 
 def _wire_flow(*offers: dict[str, Any]) -> dict[str, Any]:

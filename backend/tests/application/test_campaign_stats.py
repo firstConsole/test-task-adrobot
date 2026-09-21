@@ -17,6 +17,7 @@ import pytest
 from adrobot.application.dto import OfferClicks, StreamClicks
 from adrobot.application.errors import CampaignNotFoundError
 from adrobot.application.statistics import StatsReader
+from adrobot.application.time_zone import TrackerTimeZone
 from adrobot.application.use_cases.campaign_stats import GetCampaignStats
 from adrobot.domain.ids import CampaignId, KeitaroCampaignId, KeitaroStreamId
 from adrobot.domain.offer import OfferStats
@@ -37,9 +38,8 @@ TODAYS_OFFERS = {
 
 def statistics(world: FakeWorld, *, timezone: str = "UTC") -> GetCampaignStats:
     """The scenario as `api/deps.py` assembles it, over this world's fakes."""
-    return GetCampaignStats(
-        stats=StatsReader(world.reports, world.clock, timezone=timezone), uow=world.uow
-    )
+    zone = TrackerTimeZone(world.admin, configured=timezone)
+    return GetCampaignStats(stats=StatsReader(world.reports, world.clock, zone=zone), uow=world.uow)
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ async def test_it_asks_about_the_campaign_the_tracker_knows_and_not_about_our_ow
 
     await statistics(world)(campaign_id)
 
-    asked = {campaign for campaign, _ in world.reports.asked}
+    asked = {campaign for campaign, _, _ in world.reports.asked}
     assert asked == {KeitaroCampaignId(FIRST_CAMPAIGN_ID)}
 
 
@@ -100,7 +100,7 @@ async def test_today_is_the_trackers_day_and_not_this_machines(world: FakeWorld)
 
     stats = await statistics(world, timezone="Australia/Sydney")(campaign_id)
 
-    assert [day for _, day in world.reports.asked] == [stats.day, stats.day]
+    assert [day for _, day, _ in world.reports.asked] == [stats.day, stats.day]
     assert stats.day.isoformat() == "2026-09-21"
     # Printed next to the number, because "clicks today" is unverifiable without it.
     assert stats.timezone == "Australia/Sydney"
@@ -132,8 +132,9 @@ async def test_no_database_transaction_is_open_while_a_report_is_in_flight() -> 
     watching = ReportsThatWatchTheDatabase(world.uow, clicks=TODAYS_CLICKS, stats=TODAYS_OFFERS)
     campaign_id, _ = await given_mirrored_campaign(world)
 
+    zone = TrackerTimeZone(world.admin, configured="UTC")
     stats = await GetCampaignStats(
-        stats=StatsReader(watching, world.clock, timezone="UTC"), uow=world.uow
+        stats=StatsReader(watching, world.clock, zone=zone), uow=world.uow
     )(campaign_id)
 
     assert StreamClicks(keitaro_stream_id=ROTATING_FLOW, clicks=7) in stats.streams

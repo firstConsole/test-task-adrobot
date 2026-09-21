@@ -77,7 +77,19 @@ _MAX_REDACT_DEPTH: Final = 8
 # is on the list because Keitaro returns a campaign's Click API token inside the campaign
 # object (PLAN-BACKEND §10) and a non-2xx body is logged.
 _SECRET_KEY_MARKERS: Final = frozenset(
-    {"apikey", "authorization", "cookie", "credential", "password", "secret", "token"}
+    {
+        "apikey",
+        "authorization",
+        "cookie",
+        "credential",
+        # `GET /settings`, which the time-zone resolver reads, answers with the tracker's
+        # own licence key beside the zone. Its 2xx body is never logged; this is what keeps
+        # a build answering 500 with the same object from putting it in the stream.
+        "license",
+        "password",
+        "secret",
+        "token",
+    }
 )
 
 # uvicorn's own dictConfig runs before our factory is imported and leaves these three with

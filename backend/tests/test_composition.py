@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from adrobot.application.reference import ReferenceResolver
 from adrobot.application.statistics import StatsReader
+from adrobot.application.time_zone import TrackerTimeZone
 from adrobot.composition import build_ports
 from adrobot.infrastructure.db.uow import SqlAlchemyUnitOfWork
 from adrobot.infrastructure.keitaro.admin import HttpKeitaroAdmin
@@ -30,6 +31,7 @@ async def test_it_builds_the_adapters_the_service_actually_talks_through(
         assert isinstance(ports.reports, HttpKeitaroReports)
         assert isinstance(ports.references, ReferenceResolver)
         assert isinstance(ports.statistics, StatsReader)
+        assert isinstance(ports.zone, TrackerTimeZone)
         assert isinstance(ports.aliases, SecretsAliasFactory)
         assert isinstance(ports.clock, SystemClock)
 
@@ -51,7 +53,8 @@ async def test_the_statistics_reader_is_built_on_the_same_report_builder_and_the
     # asks for one day and labels it another.
     async with build_ports(settings) as ports:
         assert ports.statistics._reports is ports.reports
-        assert ports.statistics._timezone == settings.keitaro_timezone
+        assert ports.statistics._zone is ports.zone
+        assert ports.zone._configured == settings.keitaro_timezone
 
 
 async def test_the_unit_of_work_is_asked_for_per_request_and_not_shared(

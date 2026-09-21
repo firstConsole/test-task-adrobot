@@ -706,6 +706,8 @@ class ReportsThatWatchTheDatabase(FakeKeitaroReports):
         self._uow = uow
 
     @override
-    def _called(self, method: str, campaign_id: KeitaroCampaignId, day: date) -> None:
+    def _called(
+        self, method: str, campaign_id: KeitaroCampaignId, day: date, timezone: str
+    ) -> None:
         assert not self._uow.open, f"{method} was called with a database transaction open"
-        super()._called(method, campaign_id, day)
+        super()._called(method, campaign_id, day, timezone)

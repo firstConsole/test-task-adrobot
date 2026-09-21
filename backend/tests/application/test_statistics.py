@@ -16,9 +16,10 @@ from adrobot.application.statistics import (
     UNAVAILABLE,
     StatsReader,
 )
+from adrobot.application.time_zone import TrackerTimeZone
 from adrobot.domain.ids import KeitaroCampaignId, KeitaroStreamId, OfferId
 from adrobot.domain.offer import OfferStats
-from tests.fakes import FIRST_CAMPAIGN_ID, FakeClock, FakeKeitaroReports
+from tests.fakes import FIRST_CAMPAIGN_ID, FakeClock, FakeKeitaroAdmin, FakeKeitaroReports
 
 CAMPAIGN = KeitaroCampaignId(FIRST_CAMPAIGN_ID)
 ANOTHER = KeitaroCampaignId(FIRST_CAMPAIGN_ID + 1)
@@ -34,7 +35,8 @@ def reader(
 ) -> tuple[StatsReader, FakeKeitaroReports, FakeClock]:
     reports = FakeKeitaroReports(clicks=TODAYS_CLICKS, stats=TODAYS_OFFERS)
     clock = FakeClock(at)
-    return StatsReader(reports, clock, timezone=timezone), reports, clock
+    zone = TrackerTimeZone(FakeKeitaroAdmin(), configured=timezone)
+    return StatsReader(reports, clock, zone=zone), reports, clock
 
 
 async def test_a_second_look_inside_the_window_costs_the_tracker_nothing() -> None:
@@ -65,7 +67,12 @@ async def test_one_campaigns_reading_is_never_served_for_another() -> None:
     await read.read(CAMPAIGN)
     await read.read(ANOTHER)
 
-    assert [campaign for campaign, _ in reports.asked] == [CAMPAIGN, CAMPAIGN, ANOTHER, ANOTHER]
+    assert [campaign for campaign, _, _ in reports.asked] == [
+        CAMPAIGN,
+        CAMPAIGN,
+        ANOTHER,
+        ANOTHER,
+    ]
 
 
 async def test_a_reading_is_the_trackers_numbers_and_says_so() -> None:
@@ -168,7 +175,10 @@ async def test_the_day_asked_for_is_the_trackers_and_not_this_machines() -> None
     stats = await read.read(CAMPAIGN)
 
     assert stats.day.isoformat() == "2026-09-21"
-    assert [day.isoformat() for _, day in reports.asked] == ["2026-09-21", "2026-09-21"]
+    assert [day.isoformat() for _, day, _ in reports.asked] == ["2026-09-21", "2026-09-21"]
+    # And asked for in the same zone the date was worked out in, which is the whole point
+    # of the zone travelling with the day: the two cannot come apart.
+    assert {zone for _, _, zone in reports.asked} == {"Australia/Sydney"}
 
 
 async def test_the_cache_has_a_ceiling_and_does_not_grow_without_one() -> None:
@@ -185,7 +195,11 @@ async def test_the_cache_has_a_ceiling_and_does_not_grow_without_one() -> None:
 
 
 async def test_a_campaign_that_took_no_traffic_is_available_and_empty() -> None:
-    read = StatsReader(FakeKeitaroReports(), FakeClock(), timezone="UTC")
+    read = StatsReader(
+        FakeKeitaroReports(),
+        FakeClock(),
+        zone=TrackerTimeZone(FakeKeitaroAdmin(), configured="UTC"),
+    )
 
     stats = await read.read(CAMPAIGN)
 

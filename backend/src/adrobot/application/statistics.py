@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
     from adrobot.application.ports.keitaro import KeitaroReportsPort
     from adrobot.application.ports.system import Clock
+    from adrobot.application.time_zone import TrackerTimeZone
     from adrobot.domain.ids import KeitaroCampaignId
 
 STATS_TTL: Final = timedelta(seconds=45)
@@ -71,14 +72,16 @@ class StatsReader:
         reports: KeitaroReportsPort,
         clock: Clock,
         *,
-        timezone: str,
+        zone: TrackerTimeZone,
         ttl: timedelta = STATS_TTL,
     ) -> None:
         self._reports = reports
         self._clock = clock
-        # The tracker's zone by name, which is what decides where today begins. Validated
-        # against the tz database at boot, so `ZoneInfo` below cannot fail on a request.
-        self._timezone = timezone
+        # The tracker's zone, which is what decides where today begins — and what every
+        # report is then asked for, so that the day this works out and the day the tracker
+        # reports on cannot come apart. Whatever it resolves to is a name `zoneinfo` has
+        # already accepted, so `ZoneInfo` below cannot fail on a request.
+        self._zone = zone
         self._ttl = ttl
         self._held: dict[KeitaroCampaignId, CampaignStats] = {}
 
@@ -91,8 +94,9 @@ class StatsReader:
         held across two HTTP calls would make one slow campaign stop every other campaign's
         column for as long as the tracker took.
         """
+        timezone = await self._zone.resolve()
         at = self._clock.now()
-        day = at.astimezone(ZoneInfo(self._timezone)).date()
+        day = at.astimezone(ZoneInfo(timezone)).date()
         held = self._held.get(campaign_id)
         if held is not None and held.day != day:
             held = None
@@ -100,14 +104,14 @@ class StatsReader:
         if fresh is not None:
             return fresh
         try:
-            reading = await self._from_tracker(campaign_id, day, at)
+            reading = await self._from_tracker(campaign_id, day, at, timezone=timezone)
         except UpstreamError:
-            return self._degraded(held, day)
+            return self._degraded(held, day, timezone)
         self._keep(campaign_id, reading)
         return reading
 
     async def _from_tracker(
-        self, campaign_id: KeitaroCampaignId, day: date, at: datetime
+        self, campaign_id: KeitaroCampaignId, day: date, at: datetime, *, timezone: str
     ) -> CampaignStats:
         """Build one reading out of the two reports that make the whole screen.
 
@@ -116,11 +120,11 @@ class StatsReader:
         alongside the first would rediscover it — and a failure of either would leave the
         other in flight with nobody to read its result.
         """
-        by_stream = await self._reports.clicks_by_stream(campaign_id, day)
-        by_offer = await self._reports.clicks_by_offer(campaign_id, day)
+        by_stream = await self._reports.clicks_by_stream(campaign_id, day, timezone=timezone)
+        by_offer = await self._reports.clicks_by_offer(campaign_id, day, timezone=timezone)
         return CampaignStats(
             day=day,
-            timezone=self._timezone,
+            timezone=timezone,
             read_at=at,
             # Ordered by id, so that two reads of one screen answer identically whatever
             # order the report came back in. Nothing reads the order: the table draws each
@@ -135,7 +139,7 @@ class StatsReader:
             ),
         )
 
-    def _degraded(self, held: CampaignStats | None, day: date) -> CampaignStats:
+    def _degraded(self, held: CampaignStats | None, day: date, timezone: str) -> CampaignStats:
         """Answer without the tracker: the last reading if there is one, nothing if not.
 
         The failed attempt is not kept. What is held stays the newest reading that was ever
@@ -143,7 +147,7 @@ class StatsReader:
         than forgetting it, and the first successful read replaces it outright.
         """
         if held is None:
-            return CampaignStats(day=day, timezone=self._timezone, unavailable_reason=UNAVAILABLE)
+            return CampaignStats(day=day, timezone=timezone, unavailable_reason=UNAVAILABLE)
         return replace(held, unavailable_reason=UNAVAILABLE)
 
     def _fresh(self, held: CampaignStats | None, at: datetime) -> CampaignStats | None:

@@ -9,7 +9,7 @@ media buyer an offer took no traffic when nobody was ever asked.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -178,3 +178,32 @@ async def test_an_offer_the_report_did_not_mention_has_no_row_rather_than_a_zero
     body = await read(api, campaign_id)
 
     assert [row["offer_id"] for row in body["offers"]] == [int(NEWEST)]
+
+
+async def test_the_caption_names_the_trackers_own_zone_and_the_day_it_makes(
+    api: httpx.AsyncClient, world: FakeWorld
+) -> None:
+    # The tracker is in Sydney and this service is configured for UTC — which is the gap
+    # `GET /settings` exists to close, and the one that puts yesterday's traffic under
+    # today's heading for as many hours as the two are apart.
+    world.admin.time_zone = "Australia/Sydney"
+    world.clock.at = datetime(2026, 9, 20, 23, 30, tzinfo=UTC)
+    campaign_id, _ = await given_mirrored_campaign(world)
+
+    body = await read(api, campaign_id)
+
+    assert body["timezone"] == "Australia/Sydney"
+    assert body["day"] == "2026-09-21"
+    # And the report was asked for in the same zone, so the day reported on and the day
+    # captioned cannot come apart.
+    assert {zone for _, _, zone in world.reports.asked} == {"Australia/Sydney"}
+
+
+async def test_a_tracker_that_names_no_zone_leaves_the_configured_one_in_the_caption(
+    api: httpx.AsyncClient, world: FakeWorld
+) -> None:
+    campaign_id, _ = await given_mirrored_campaign(world)
+
+    body = await read(api, campaign_id)
+
+    assert body["timezone"] == VALID_ENVIRONMENT.get("ADROBOT_KEITARO_TIMEZONE", "UTC")

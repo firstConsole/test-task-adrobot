@@ -158,6 +158,15 @@ def test_redact_hides_a_nested_keitaro_campaign_token() -> None:
     }
 
 
+def test_redact_hides_the_licence_key_a_settings_object_carries() -> None:
+    # `GET /settings` is read for one field and answers with several. A 2xx body is never
+    # logged at all, so this is the second line of the same defence rather than the first.
+    assert redact({"timezone": "Europe/Madrid", "license_key": "not-ours-to-hold"}) == {
+        "timezone": "Europe/Madrid",
+        "license_key": "[redacted]",
+    }
+
+
 def test_redact_leaves_the_argument_alone() -> None:
     # It is called on a parsed response body that the caller goes on to use.
     body = {"api_key": "secret"}
