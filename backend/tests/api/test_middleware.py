@@ -12,6 +12,7 @@ from adrobot.api.app import MAX_REQUEST_BODY_BYTES, create_app
 from adrobot.api.middleware import CORRELATION_ID_HEADER
 from adrobot.logging import correlation_id
 from tests.helpers import records_named
+from tests.wiring import fake_ports_factory
 
 if TYPE_CHECKING:
     from collections.abc import MutableMapping
@@ -55,7 +56,7 @@ async def test_the_id_does_not_leak_between_concurrent_requests(settings: Settin
     # them. 6.7 reads exactly this value when it renders problem+json.
     arrived = anyio.Semaphore(0)
     release = anyio.Event()
-    app = create_app(settings=settings)
+    app = create_app(settings=settings, ports_factory=fake_ports_factory())
     seen: dict[str, str | None] = {}
 
     @app.get("/_probe/{name}")
@@ -133,7 +134,7 @@ async def test_a_health_probe_is_logged_at_debug(
 async def test_an_unhandled_exception_is_logged_with_its_traceback_and_re_raised(
     settings: Settings, log_stream: StringIO
 ) -> None:
-    app = create_app(settings=settings)
+    app = create_app(settings=settings, ports_factory=fake_ports_factory())
 
     @app.get("/_boom")
     async def boom() -> None:
@@ -156,7 +157,7 @@ async def test_a_returned_server_error_is_logged_at_error_too(
 ) -> None:
     # Not every 500 arrives as an exception. From 6.7 onward the RFC 9457 handlers turn a
     # failure into a *returned* response, and that is the shape this branch serves.
-    app = create_app(settings=settings)
+    app = create_app(settings=settings, ports_factory=fake_ports_factory())
 
     @app.get("/_unavailable")
     async def unavailable() -> Response:

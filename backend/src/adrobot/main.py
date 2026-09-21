@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from adrobot.api.app import create_app
+from adrobot.composition import build_ports
 from adrobot.logging import configure_logging
 from adrobot.settings import Settings
 
@@ -40,4 +41,7 @@ def create_asgi_app() -> FastAPI:
         # behind a `Settings.log_renderer`.
         renderer="console" if settings.env == "dev" else "json",
     )
-    return create_app(settings=settings)
+    # The one place the real ports are named. `create_app` takes the factory rather than
+    # the ports so that nothing is opened until the application starts serving, and so that
+    # a test can hand in a different factory without this module having an opinion.
+    return create_app(settings=settings, ports_factory=build_ports)

@@ -26,6 +26,7 @@ from adrobot.application.ports.persistence import (
     Transaction,
     UnitOfWork,
 )
+from adrobot.application.ports.system import Clock
 
 if TYPE_CHECKING:
     from abc import ABCMeta
@@ -43,7 +44,10 @@ AWAITABLE_PORTS = (
     OfferCatalogueRepository,
 )
 
-PORTS = (*AWAITABLE_PORTS, UnitOfWork)
+# `Clock` is a port and is held to everything but the rule above: it reads this machine's
+# own clock, so an `async def now()` would only make `await` the price of asking the time.
+# `UnitOfWork.begin` is synchronous for a different reason, which its own test states.
+PORTS = (*AWAITABLE_PORTS, UnitOfWork, Clock)
 
 
 def _declared(port: ABCMeta) -> dict[str, object]:

@@ -15,6 +15,7 @@ from sqlalchemy import CheckConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateTable, Table
 
+from adrobot.api.routers.health import HEALTH_PATHS
 from adrobot.domain.ids import OfferId
 from adrobot.domain.shares import OfferRow
 from adrobot.infrastructure.db import models  # noqa: F401  # registers the tables on Base
@@ -23,6 +24,8 @@ from adrobot.infrastructure.db.base import Base
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from io import StringIO
+
+    from fastapi import FastAPI
 
 # Written out here rather than imported from `adrobot.settings`. The prefix is a
 # cross-component decision (PLAN-00 §5.1) that compose, the Makefile, CI and .env.example
@@ -184,3 +187,23 @@ class Statements:
 
     def __repr__(self) -> str:
         return f"Statements{self.verbs!r}"
+
+
+def unprotected_paths(app: FastAPI) -> set[str]:
+    """Return the paths of every operation the OpenAPI document says needs no credential.
+
+    `app.openapi()["paths"]` and never `app.routes`: `include_router` appends one lazy
+    router object rather than flattening it, so filtering `app.routes` for `APIRoute`
+    answers with an empty set — and a check that inspects nothing passes.
+
+    The document is the right thing to read for a second reason: it is what the frontend
+    generates its client from, so an endpoint that is open here is an endpoint the generated
+    client will call without a token, and the two failures are the same failure.
+    """
+    return {
+        path
+        for path, operations in app.openapi()["paths"].items()
+        if path not in HEALTH_PATHS
+        for operation in operations.values()
+        if not operation.get("security")
+    }
