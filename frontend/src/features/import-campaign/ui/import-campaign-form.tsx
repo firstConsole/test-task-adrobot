@@ -95,9 +95,6 @@ export function ImportCampaignForm() {
             {adopt.isPending ? 'READING…' : 'IMPORT'}
           </Button>
         </div>
-        <FieldDescription>
-          Кампания, собранная руками или кем-то ещё, уже со всем содержимым.
-        </FieldDescription>
         <FieldError errors={[form.formState.errors.keitaro_campaign_id]} />
       </Field>
     </form>

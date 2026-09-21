@@ -28,7 +28,6 @@ export function CampaignListPage() {
       <div>
         <h2 className="text-lg font-medium">Кампании</h2>
         <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
-          Всё, чему этот сервис держит зеркало: и созданное здесь, и принятое со стороны.
           Откройте кампанию, чтобы править офферы, которые крутит её второй поток.
         </p>
       </div>
