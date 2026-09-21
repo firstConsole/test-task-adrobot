@@ -1,6 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { TriangleAlertIcon } from 'lucide-react'
 import { useState } from 'react'
-import { Controller, useForm } from 'react-hook-form'
+import { Controller, useForm, useWatch } from 'react-hook-form'
 import { useNavigate } from 'react-router'
 
 import type { Offer } from '@/entities/offer'
@@ -18,6 +19,7 @@ import {
 import { Input } from '@/shared/ui/input'
 
 import { useCreateCampaign } from '../api/use-create-campaign'
+import { geoWarning } from '../model/geo-warning'
 import { readRefusals } from '../model/refusals'
 import type { CreateCampaignValues } from '../model/schema'
 import { EMPTY_CAMPAIGN, createCampaignSchema } from '../model/schema'
@@ -44,6 +46,11 @@ export function CreateCampaignForm() {
 
   const create = useCreateCampaign()
   const navigate = useNavigate()
+
+  // Subscribed to rather than read off `getValues`, because this has to redraw when either
+  // half of the pair changes — and the offer is usually the half that changes last.
+  const country = useWatch({ control: form.control, name: 'country' })
+  const mismatch = geoWarning(country, offer)
 
   const submit = (values: CreateCampaignValues) => {
     // The whole form is disabled while a creation is in flight, so this can only be reached
@@ -153,6 +160,19 @@ export function CreateCampaignForm() {
                   Flow 2 rotates the offers and starts with this one at 100%.
                 </FieldDescription>
                 <FieldError errors={[fieldState.error]} />
+
+                {/* A warning and not an error: the campaign is buildable, it just would not
+                    do anything. Amber and a triangle rather than red, and the CREATE button
+                    stays live — a buyer who means it can mean it. */}
+                {mismatch === null ? null : (
+                  <p
+                    role="status"
+                    className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                  >
+                    <TriangleAlertIcon className="mt-0.5 size-4 shrink-0" />
+                    <span>{mismatch}</span>
+                  </p>
+                )}
               </Field>
             )}
           />
