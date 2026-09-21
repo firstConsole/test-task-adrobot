@@ -1,9 +1,12 @@
+import { ExternalLinkIcon } from 'lucide-react'
 import { Link, useParams } from 'react-router'
 
 import { useCampaignStreams } from '@/entities/stream'
+import { FetchStreamsButton } from '@/features/sync-streams'
 import { ApiError } from '@/shared/api/client'
 import { ROUTES } from '@/shared/config/routes'
 import { problemMessage } from '@/shared/lib/problem-message'
+import { Button } from '@/shared/ui/button'
 import { Table } from '@/shared/ui/table'
 import { COLUMN_COUNT, OfferTableHead, StreamGroup } from '@/widgets/stream-group'
 
@@ -48,6 +51,18 @@ function CampaignStreams({ campaignId }: { campaignId: string }) {
         <span aria-hidden>/</span>
         <span>Keitaro streams</span>
       </nav>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <FetchStreamsButton campaignId={campaignId} />
+        {/* The address of the tracker is never in this bundle: the link arrives on the
+            campaign, built by the layer that holds the configuration. */}
+        <Button asChild variant="outline">
+          <a href={campaign.tracker_url} target="_blank" rel="noreferrer">
+            VIEW IN KT
+            <ExternalLinkIcon />
+          </a>
+        </Button>
+      </div>
 
       <div className="overflow-hidden rounded-lg border">
         <Table>

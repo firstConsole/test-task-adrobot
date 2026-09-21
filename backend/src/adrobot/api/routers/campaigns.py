@@ -35,6 +35,7 @@ from adrobot.api.deps import (
     ImportCampaignDep,
     ListCampaignsDep,
     RepairCampaignDep,
+    SettingsDep,
     SyncCampaignDep,
 )
 from adrobot.api.schemas.campaigns import (
@@ -61,10 +62,12 @@ router = APIRouter(prefix="/api/v1/campaigns", tags=["campaigns"], dependencies=
     responses=problem_responses(401, 422, 502),
 )
 async def create_campaign(
-    body: CreateCampaignRequest, create: CreateCampaignDep
+    body: CreateCampaignRequest, create: CreateCampaignDep, settings: SettingsDep
 ) -> CampaignResponse:
     """Build the campaign part 1 describes, and report how far the tracker let us get."""
-    return CampaignResponse.of(await create(body.to_command()))
+    return CampaignResponse.of(
+        await create(body.to_command()), tracker=str(settings.keitaro_public_base_url)
+    )
 
 
 @router.post(
@@ -74,10 +77,13 @@ async def create_campaign(
     responses=problem_responses(401, 404, 409, 422, 502),
 )
 async def import_campaign(
-    body: ImportCampaignRequest, adopt: ImportCampaignDep
+    body: ImportCampaignRequest, adopt: ImportCampaignDep, settings: SettingsDep
 ) -> CampaignResponse:
     """Mirror an existing campaign and its flows, which is what part 2 opens."""
-    return CampaignResponse.of(await adopt(KeitaroCampaignId(body.keitaro_campaign_id)))
+    return CampaignResponse.of(
+        await adopt(KeitaroCampaignId(body.keitaro_campaign_id)),
+        tracker=str(settings.keitaro_public_base_url),
+    )
 
 
 @router.get(
@@ -86,7 +92,7 @@ async def import_campaign(
     responses=problem_responses(401, 422),
 )
 async def list_campaigns(
-    query: Annotated[CampaignsQuery, Query()], campaigns: ListCampaignsDep
+    query: Annotated[CampaignsQuery, Query()], campaigns: ListCampaignsDep, settings: SettingsDep
 ) -> CampaignsPageResponse:
     """Read one page. `after` is the `next_cursor` of the page before it, unread."""
     return CampaignsPageResponse.of(
@@ -98,7 +104,8 @@ async def list_campaigns(
                 query=query.q,
                 limit=query.limit,
             )
-        )
+        ),
+        tracker=str(settings.keitaro_public_base_url),
     )
 
 
@@ -107,9 +114,13 @@ async def list_campaigns(
     summary="Finish a campaign whose flows were never built",
     responses=problem_responses(401, 404, 409, 502),
 )
-async def repair_campaign(campaign_id: UUID, repair: RepairCampaignDep) -> CampaignResponse:
+async def repair_campaign(
+    campaign_id: UUID, repair: RepairCampaignDep, settings: SettingsDep
+) -> CampaignResponse:
     """Create whatever of the two flows the tracker does not have. Safe to press twice."""
-    return CampaignResponse.of(await repair(CampaignId(campaign_id)))
+    return CampaignResponse.of(
+        await repair(CampaignId(campaign_id)), tracker=str(settings.keitaro_public_base_url)
+    )
 
 
 @router.post(
@@ -117,9 +128,13 @@ async def repair_campaign(campaign_id: UUID, repair: RepairCampaignDep) -> Campa
     summary="Read this campaign and its flows from the tracker again",
     responses=problem_responses(401, 404, 502),
 )
-async def refetch_campaign(campaign_id: UUID, sync: SyncCampaignDep) -> CampaignResponse:
+async def refetch_campaign(
+    campaign_id: UUID, sync: SyncCampaignDep, settings: SettingsDep
+) -> CampaignResponse:
     """FETCH STREAMS FROM KT. What the tracker no longer returns is kept and marked absent."""
-    return CampaignResponse.of(await sync(CampaignId(campaign_id)))
+    return CampaignResponse.of(
+        await sync(CampaignId(campaign_id)), tracker=str(settings.keitaro_public_base_url)
+    )
 
 
 @router.get(
