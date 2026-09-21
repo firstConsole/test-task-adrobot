@@ -311,6 +311,10 @@ class FakeKeitaroReports(KeitaroReportsPort):
         self.clicks = {KeitaroStreamId(key): value for key, value in clicks.items()}
         self.stats = {OfferId(key): value for key, value in stats.items()}
         self.calls: list[str] = []
+        # Which campaign, and which day. Separate from `calls` because it answers the other
+        # half of the question: a scenario that read the report for this machine's date
+        # instead of the tracker's calls exactly the same methods in exactly the same order.
+        self.asked: list[tuple[KeitaroCampaignId, date]] = []
         # The tracker's report builder is the part that falls over first, and a screen that
         # loses its Stats column while the editor keeps working is what 8.2 has to do.
         self.failure: Exception | None = None
@@ -319,18 +323,19 @@ class FakeKeitaroReports(KeitaroReportsPort):
     async def clicks_by_stream(
         self, campaign_id: KeitaroCampaignId, day: date
     ) -> Mapping[KeitaroStreamId, int]:
-        self._called("clicks_by_stream")
+        self._called("clicks_by_stream", campaign_id, day)
         return dict(self.clicks)
 
     @override
     async def clicks_by_offer(
         self, campaign_id: KeitaroCampaignId, day: date
     ) -> Mapping[OfferId, OfferStats]:
-        self._called("clicks_by_offer")
+        self._called("clicks_by_offer", campaign_id, day)
         return dict(self.stats)
 
-    def _called(self, method: str) -> None:
+    def _called(self, method: str, campaign_id: KeitaroCampaignId, day: date) -> None:
         self.calls.append(method)
+        self.asked.append((campaign_id, day))
         if self.failure is not None:
             raise self.failure
 
