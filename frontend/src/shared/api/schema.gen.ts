@@ -330,6 +330,10 @@ export interface components {
          * CampaignResponse
          * @description A campaign as this API answers for one.
          *
+         *     Two links, and they go to different places. `public_url` is what a buyer puts in an ad;
+         *     `tracker_url` is where a reviewer opens the campaign in Keitaro to check our arithmetic
+         *     against the tracker's own screen.
+         *
          *     `public_url` is a plain string and not an `HttpUrl`: it is built from a domain name the
          *     tracker gave us, and a response model that refused to serialise somebody else's data
          *     would turn a campaign that exists into a 500.
@@ -367,6 +371,8 @@ export interface components {
             state: string;
             /** Synced At */
             synced_at?: string | null;
+            /** Tracker Url */
+            tracker_url: string;
         };
         /**
          * CampaignSetupStatus

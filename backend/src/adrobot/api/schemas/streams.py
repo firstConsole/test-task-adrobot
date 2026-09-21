@@ -233,6 +233,6 @@ class StreamsResponse(BaseModel):
     def of(cls, view: EditorView, *, tracker: str) -> StreamsResponse:
         """Render one campaign's editor screen."""
         return cls(
-            campaign=CampaignResponse.of(view.campaign),
+            campaign=CampaignResponse.of(view.campaign, tracker=tracker),
             streams=tuple(StreamResponse.of(flow, tracker=tracker) for flow in view.streams),
         )
