@@ -41,5 +41,21 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
 
+  web:
+    image: adrobot-web:dev
+    build:
+      context: ./frontend
+    pull_policy: build
+    # One variable and not `env_file: .env`: nginx has no business holding the tracker key
+    # or the database password. The filter keeps envsubst off nginx's own $host and $scheme.
+    environment:
+      ADROBOT_ACCESS_TOKEN: ${ADROBOT_ACCESS_TOKEN:?copy .env.example to .env first}
+      NGINX_ENVSUBST_FILTER: "^ADROBOT_"
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+
 volumes:
   pgdata:

@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ],
+  /* Compiles nothing — `files` is empty. It is here because every tool that resolves `@/`
+     without running the build reads this file and does not follow project references:
+     the shadcn CLI, the ESLint import resolver, vitest. */
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] }
+  }
+}
