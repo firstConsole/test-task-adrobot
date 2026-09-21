@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Annotated, cast
 from fastapi import Depends, Request
 
 from adrobot.application.ports.persistence import UnitOfWork
+from adrobot.application.use_cases.campaign_stats import GetCampaignStats
 from adrobot.application.use_cases.create_campaign import CreateCampaign, RepairCampaign
 from adrobot.application.use_cases.edit_draft import DiscardDraft, EditDraft
 from adrobot.application.use_cases.editor import GetEditorView, GetStreamView
@@ -111,6 +112,14 @@ def _list_campaigns(uow: Annotated[UnitOfWork, Depends(_unit_of_work)]) -> ListC
     return ListCampaigns(uow=uow)
 
 
+def _campaign_stats(
+    ports: Annotated[AppPorts, Depends(_ports)],
+    uow: Annotated[UnitOfWork, Depends(_unit_of_work)],
+) -> GetCampaignStats:
+    """Hand this request the process's own reader, whose window is why it is shared."""
+    return GetCampaignStats(stats=ports.statistics, uow=uow)
+
+
 # The editor. Every one of these but the push holds a unit of work and nothing else: staging
 # an edit, pinning a row and cancelling never reach the tracker, which is what makes them
 # answer in one short transaction and no network call.
@@ -175,6 +184,7 @@ RepairCampaignDep = Annotated[RepairCampaign, Depends(_repair_campaign)]
 ImportCampaignDep = Annotated[ImportCampaign, Depends(_import_campaign)]
 SyncCampaignDep = Annotated[SyncCampaign, Depends(_sync_campaign)]
 ListCampaignsDep = Annotated[ListCampaigns, Depends(_list_campaigns)]
+GetCampaignStatsDep = Annotated[GetCampaignStats, Depends(_campaign_stats)]
 
 GetEditorViewDep = Annotated[GetEditorView, Depends(_editor_view)]
 GetStreamViewDep = Annotated[GetStreamView, Depends(_stream_view)]

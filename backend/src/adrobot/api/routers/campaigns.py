@@ -1,19 +1,25 @@
-"""The campaign endpoints: create, adopt, list, finish, refresh.
+"""The campaign endpoints: create, adopt, list, finish, refresh, and the day's numbers.
 
 Every handler is one line of work and no decisions. There is no `try/except` here and no
 `HTTPException`: a failure is raised by the scenario in its own words and rendered by the
 handlers in `api/errors.py`, which is the only place that knows what a failure is worth in
 HTTP.
 
-`dependencies=PROTECTED` is on the router and not on the handlers. One line guards five
-endpoints, a sixth added below inherits it, and the test that walks the OpenAPI document
-fails if this line is ever the thing that gets deleted.
+`dependencies=PROTECTED` is on the router and not on the handlers. One line guards six
+endpoints, a seventh added below would inherit it, and the test that walks the OpenAPI
+document fails if this line is ever the thing that gets deleted.
 
 The status codes are the two the RFC makes worth distinguishing. Creating and adopting
 answer **201**, because a campaign now exists in the tracker that did not before — and a
 create whose flows failed still answers 201, because the campaign is exactly as created as
 the body says it is. Finishing and refreshing answer **200**: the resource was already
 there.
+
+Statistics answer **200 whatever the report builder did**, which is the one place this file
+departs from "the scenario raises and `api/errors.py` renders it". A tracker that will not
+build a report has not failed this request: the campaign is here, the numbers are the part
+that is missing, and the body says so in three fields. Answering 502 would put an error
+toast over a working editor to report a dark column.
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ from fastapi import APIRouter, Query, status
 
 from adrobot.api.deps import (
     CreateCampaignDep,
+    GetCampaignStatsDep,
     ImportCampaignDep,
     ListCampaignsDep,
     RepairCampaignDep,
@@ -39,6 +46,7 @@ from adrobot.api.schemas.campaigns import (
     decode_cursor,
 )
 from adrobot.api.schemas.problem import problem_responses
+from adrobot.api.schemas.stats import CampaignStatsResponse
 from adrobot.api.security import PROTECTED
 from adrobot.application.dto import ListCampaignsQuery
 from adrobot.domain.ids import CampaignId, KeitaroCampaignId
@@ -112,3 +120,19 @@ async def repair_campaign(campaign_id: UUID, repair: RepairCampaignDep) -> Campa
 async def refetch_campaign(campaign_id: UUID, sync: SyncCampaignDep) -> CampaignResponse:
     """FETCH STREAMS FROM KT. What the tracker no longer returns is kept and marked absent."""
     return CampaignResponse.of(await sync(CampaignId(campaign_id)))
+
+
+@router.get(
+    "/{campaign_id}/stats",
+    summary="Read this campaign's clicks today, by flow and by offer",
+    responses=problem_responses(401, 404),
+)
+async def read_campaign_stats(
+    campaign_id: UUID, statistics: GetCampaignStatsDep
+) -> CampaignStatsResponse:
+    """Two reports behind one answer, cached for the whole process for forty-five seconds.
+
+    No 502 in the list above, and that is the endpoint's contract rather than an oversight:
+    a report the tracker would not build comes back as `available: false` with a reason.
+    """
+    return CampaignStatsResponse.of(await statistics(CampaignId(campaign_id)))
