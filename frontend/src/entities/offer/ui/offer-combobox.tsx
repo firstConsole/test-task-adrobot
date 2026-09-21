@@ -1,6 +1,6 @@
 import { cn } from 'cn'
 import { ChevronsUpDownIcon } from 'lucide-react'
-import type { Ref } from 'react'
+import type { ReactNode, Ref } from 'react'
 import { useState } from 'react'
 
 import { ApiError } from '@/shared/api/client'
@@ -32,6 +32,15 @@ type OfferComboboxProps = {
   id?: string
   /** The form library's, so that a server refusal naming this field can put the focus on it. */
   ref?: Ref<HTMLButtonElement>
+  /**
+   * What to offer when the search comes back with nothing — in practice the button that
+   * reads the catalogue from Keitaro.
+   *
+   * A slot and not the button itself: refreshing the catalogue is a mutation, mutations live
+   * in `features/`, and this component is an entity. Whoever mounts it is on a layer that may
+   * reach both.
+   */
+  empty?: ReactNode
   className?: string
 }
 
@@ -54,6 +63,7 @@ export function OfferCombobox({
   placeholder = 'Select an offer…',
   id,
   ref,
+  empty,
   className,
 }: OfferComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -118,7 +128,18 @@ export function OfferCombobox({
                 ) : null}
 
                 {!searching && offers.length === 0 ? (
-                  <CommandEmpty>No results found</CommandEmpty>
+                  <CommandEmpty>
+                    {/* Two different facts, and telling them apart is the whole point: with
+                        no term typed this endpoint answers SHOW ALL OFFERS, so nothing back
+                        means the local catalogue is empty — not that the tracker has no such
+                        offer. One of them is fixed by pressing a button. */}
+                    <span className="block">
+                      {settled === ''
+                        ? 'The catalogue is empty — nothing has been read from Keitaro yet'
+                        : 'No results found'}
+                    </span>
+                    {empty === undefined ? null : <span className="mt-3 block">{empty}</span>}
+                  </CommandEmpty>
                 ) : null}
 
                 {offers.length > 0 ? (

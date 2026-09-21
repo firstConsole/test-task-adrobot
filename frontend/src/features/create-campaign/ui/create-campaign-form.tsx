@@ -1,5 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { TriangleAlertIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { useNavigate } from 'react-router'
@@ -33,7 +34,12 @@ import { GeoSelect } from './geo-select'
  * the API refuses again, over rules only it can hold — an offer that is not in the tracker,
  * a geo the campaign's own group forbids — and its 422 lands on the field it names.
  */
-export function CreateCampaignForm() {
+/**
+ * `offerEmpty` is whatever should be offered when the catalogue answers with nothing — the
+ * button that reads it from Keitaro. It arrives as a prop because that button is a feature
+ * and so is this form: sibling slices do not import each other, so the page hands it over.
+ */
+export function CreateCampaignForm({ offerEmpty }: { offerEmpty?: ReactNode } = {}) {
   const form = useForm({
     resolver: zodResolver(createCampaignSchema),
     defaultValues: EMPTY_CAMPAIGN,
@@ -155,6 +161,7 @@ export function CreateCampaignForm() {
                   }}
                   onBlur={field.onBlur}
                   invalid={fieldState.invalid}
+                  empty={offerEmpty}
                 />
                 <FieldDescription>
                   Flow 2 rotates the offers and starts with this one at 100%.

@@ -1,4 +1,5 @@
 import { CreateCampaignForm } from '@/features/create-campaign'
+import { SyncOffersButton } from '@/features/sync-offers'
 
 export function CampaignCreatePage() {
   return (
@@ -11,7 +12,7 @@ export function CampaignCreatePage() {
         </p>
       </div>
 
-      <CreateCampaignForm />
+      <CreateCampaignForm offerEmpty={<SyncOffersButton />} />
     </section>
   )
 }
