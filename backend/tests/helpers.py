@@ -16,16 +16,23 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex, CreateTable, Table
 
 from adrobot.api.routers.health import HEALTH_PATHS
+from adrobot.application.ports.persistence import CampaignSetup
+from adrobot.domain.campaign import CampaignSetupStatus
 from adrobot.domain.ids import OfferId
 from adrobot.domain.shares import OfferRow
 from adrobot.infrastructure.db import models  # noqa: F401  # registers the tables on Base
 from adrobot.infrastructure.db.base import Base
+from tests.fakes import FIRST_MOMENT, given_reference_campaign
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from io import StringIO
 
     from fastapi import FastAPI
+
+    from adrobot.application.ports.persistence import StreamView, UnitOfWork
+    from adrobot.domain.ids import CampaignId, KeitaroStreamId
+    from tests.wiring import FakeWorld
 
 # Written out here rather than imported from `adrobot.settings`. The prefix is a
 # cross-component decision (PLAN-00 §5.1) that compose, the Makefile, CI and .env.example
@@ -207,3 +214,39 @@ def unprotected_paths(app: FastAPI) -> set[str]:
         for operation in operations.values()
         if not operation.get("security")
     }
+
+
+# --- the editor's own fixture ------------------------------------------------------------
+
+ROTATING_FLOW: Final = 1
+"""Where Flow 2 sits in the list the tracker answers with. It is the one with
+`schema: landings`, so it is the only one of the reference campaign's two that rotates
+offers — and therefore the only one part 2 is about."""
+
+
+async def given_mirrored_campaign(world: FakeWorld) -> tuple[CampaignId, KeitaroStreamId]:
+    """Put campaign 93212 and its two flows into the tracker and into the mirror.
+
+    The fixture every editor test starts from, and deliberately the campaign from the video:
+    a failing assertion then reads like something a reviewer can open in Keitaro. Flow 2's
+    two offers hold 25% each, which is a clean state summing to 50 — every scenario that
+    touches this campaign has to survive that.
+    """
+    campaign = given_reference_campaign(world.admin)
+    streams = await world.admin.list_campaign_streams(campaign.id)
+    async with world.uow.begin() as transaction:
+        row = await transaction.campaigns.add(
+            campaign, setup=CampaignSetup(status=CampaignSetupStatus.READY)
+        )
+        await transaction.streams.upsert_campaign_streams(
+            campaign_id=row.id, streams=streams, at=FIRST_MOMENT
+        )
+    return row.id, streams[ROTATING_FLOW].id
+
+
+async def locked_view(
+    uow: UnitOfWork, campaign_id: CampaignId, stream_id: KeitaroStreamId
+) -> StreamView:
+    """Read one flow whole — mirror, pins and live draft — the way every write starts."""
+    async with uow.begin() as transaction:
+        return await transaction.streams.lock(campaign_id=campaign_id, stream_id=stream_id)

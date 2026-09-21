@@ -24,49 +24,20 @@ from adrobot.application.errors import (
     PushAttemptSettledError,
     StreamNotFoundError,
 )
-from adrobot.application.ports.persistence import CampaignSetup
 from adrobot.application.push import PushOutcome
-from adrobot.domain.campaign import CampaignSetupStatus
 from adrobot.domain.diff import DesiredOffer, snapshot_hash
 from adrobot.domain.draft import DraftStatus
 from adrobot.domain.ids import CampaignId, KeitaroStreamId, OfferId
 from adrobot.domain.offer import Offer
 from adrobot.domain.values import OfferState, Share
-from tests.fakes import FIRST_MOMENT, REFERENCE_OFFERS, given_reference_campaign
-from tests.helpers import shares
+from tests.fakes import FIRST_MOMENT, REFERENCE_OFFERS
+from tests.helpers import given_mirrored_campaign, locked_view, shares
 
 if TYPE_CHECKING:
-    from adrobot.application.ports.persistence import StreamView
     from adrobot.domain.shares import OfferRow
-    from tests.fake_persistence import FakeUnitOfWork
     from tests.wiring import FakeWorld
 
-FLOW_2 = 1
-"""Where the reference campaign's second flow sits in the list the tracker answers with. It
-is the one that rotates offers, so it is the flow every editor test is about."""
-
 PINNED, FREE = REFERENCE_OFFERS[1], REFERENCE_OFFERS[0]
-
-
-async def seeded(world: FakeWorld) -> tuple[CampaignId, KeitaroStreamId]:
-    """Mirror campaign 93212 and its two flows, and name the flow the editor works on."""
-    campaign = given_reference_campaign(world.admin)
-    streams = await world.admin.list_campaign_streams(campaign.id)
-    async with world.uow.begin() as transaction:
-        row = await transaction.campaigns.add(
-            campaign, setup=CampaignSetup(status=CampaignSetupStatus.READY)
-        )
-        await transaction.streams.upsert_campaign_streams(
-            campaign_id=row.id, streams=streams, at=FIRST_MOMENT
-        )
-    return row.id, streams[FLOW_2].id
-
-
-async def view_of(
-    uow: FakeUnitOfWork, campaign_id: CampaignId, stream_id: KeitaroStreamId
-) -> StreamView:
-    async with uow.begin() as transaction:
-        return await transaction.streams.lock(campaign_id=campaign_id, stream_id=stream_id)
 
 
 def _offer(offer_id: int, name: str) -> Offer:
@@ -77,41 +48,41 @@ def _offer(offer_id: int, name: str) -> Offer:
 
 
 async def test_a_flow_read_back_carries_the_tracker_s_own_shares(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
 
-    view = await view_of(world.uow, campaign_id, stream_id)
+    view = await locked_view(world.uow, campaign_id, stream_id)
 
     assert shares(view.mirror_rows) == {FREE: 25, PINNED: 25}, "50% is a real clean state"
     assert view.draft is None
 
 
 async def test_another_campaign_s_flow_is_simply_not_there(world: FakeWorld) -> None:
-    _, stream_id = await seeded(world)
+    _, stream_id = await given_mirrored_campaign(world)
 
     with pytest.raises(StreamNotFoundError):
-        await view_of(world.uow, CampaignId(uuid4()), stream_id)
+        await locked_view(world.uow, CampaignId(uuid4()), stream_id)
 
 
 # --- pins --------------------------------------------------------------------------------
 
 
 async def test_a_pin_reaches_the_mirror_rows_and_moves_no_share(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
 
     async with world.uow.begin() as transaction:
         await transaction.pins.hold(
             campaign_id=campaign_id, stream_id=stream_id, offer_id=PINNED, share=Share(40)
         )
 
-    view = await view_of(world.uow, campaign_id, stream_id)
+    view = await locked_view(world.uow, campaign_id, stream_id)
     held = {int(row.offer_id): row.pinned_share for row in view.mirror_rows}
     assert held == {FREE: None, PINNED: 40}
     assert shares(view.mirror_rows) == {FREE: 25, PINNED: 25}, "pinning recalculates nothing"
 
 
 async def test_a_pin_is_joined_into_the_draft_rows_as_well(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
-    view = await view_of(world.uow, campaign_id, stream_id)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    view = await locked_view(world.uow, campaign_id, stream_id)
 
     async with world.uow.begin() as transaction:
         await transaction.drafts.open_for(
@@ -124,7 +95,7 @@ async def test_a_pin_is_joined_into_the_draft_rows_as_well(world: FakeWorld) -> 
             campaign_id=campaign_id, stream_id=stream_id, offer_id=PINNED, share=Share(40)
         )
 
-    reread = await view_of(world.uow, campaign_id, stream_id)
+    reread = await locked_view(world.uow, campaign_id, stream_id)
     assert reread.draft is not None
     assert {int(row.offer_id): row.pinned_share for row in reread.draft.rows} == {
         FREE: None,
@@ -133,7 +104,7 @@ async def test_a_pin_is_joined_into_the_draft_rows_as_well(world: FakeWorld) -> 
 
 
 async def test_releasing_a_pin_nobody_holds_says_nothing(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
 
     async with world.uow.begin() as transaction:
         await transaction.pins.release(
@@ -142,7 +113,7 @@ async def test_releasing_a_pin_nobody_holds_says_nothing(world: FakeWorld) -> No
 
 
 async def test_a_pin_is_refused_on_a_flow_that_is_not_this_campaign_s(world: FakeWorld) -> None:
-    _, stream_id = await seeded(world)
+    _, stream_id = await given_mirrored_campaign(world)
 
     async with world.uow.begin() as transaction:
         with pytest.raises(StreamNotFoundError):
@@ -158,8 +129,8 @@ async def test_a_pin_is_refused_on_a_flow_that_is_not_this_campaign_s(world: Fak
 
 
 async def test_a_flow_may_hold_one_live_draft_at_a_time(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
-    view = await view_of(world.uow, campaign_id, stream_id)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    view = await locked_view(world.uow, campaign_id, stream_id)
 
     async with world.uow.begin() as transaction:
         await transaction.drafts.open_for(
@@ -178,8 +149,8 @@ async def test_a_flow_may_hold_one_live_draft_at_a_time(world: FakeWorld) -> Non
 
 
 async def test_a_discarded_draft_stops_being_the_live_one(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
-    view = await view_of(world.uow, campaign_id, stream_id)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    view = await locked_view(world.uow, campaign_id, stream_id)
 
     async with world.uow.begin() as transaction:
         draft = await transaction.drafts.open_for(
@@ -192,13 +163,13 @@ async def test_a_discarded_draft_stops_being_the_live_one(world: FakeWorld) -> N
             draft.id, was=DraftStatus.OPEN, becomes=DraftStatus.DISCARDED
         )
 
-    reread = await view_of(world.uow, campaign_id, stream_id)
+    reread = await locked_view(world.uow, campaign_id, stream_id)
     assert reread.draft is None, "closed softly, and gone from the screen all the same"
 
 
 async def test_a_draft_that_moved_first_refuses_the_second_mover(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
-    view = await view_of(world.uow, campaign_id, stream_id)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    view = await locked_view(world.uow, campaign_id, stream_id)
 
     async with world.uow.begin() as transaction:
         draft = await transaction.drafts.open_for(
@@ -219,8 +190,8 @@ async def test_a_draft_that_moved_first_refuses_the_second_mover(world: FakeWorl
 async def test_the_rows_of_a_draft_are_replaced_whole_and_keep_their_ordinals(
     world: FakeWorld,
 ) -> None:
-    campaign_id, stream_id = await seeded(world)
-    view = await view_of(world.uow, campaign_id, stream_id)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    view = await locked_view(world.uow, campaign_id, stream_id)
     rearranged = tuple(replace(row, share=50) for row in reversed(view.mirror_rows))
 
     async with world.uow.begin() as transaction:
@@ -232,7 +203,7 @@ async def test_the_rows_of_a_draft_are_replaced_whole_and_keep_their_ordinals(
         )
         await transaction.drafts.replace_rows(draft.id, rearranged)
 
-    reread = await view_of(world.uow, campaign_id, stream_id)
+    reread = await locked_view(world.uow, campaign_id, stream_id)
     assert reread.draft is not None
     assert shares(reread.draft.rows) == {FREE: 50, PINNED: 50}
     assert [row.seq for row in reread.draft.rows] == [1, 2], "read back in ordinal order"
@@ -242,8 +213,8 @@ async def test_the_rows_of_a_draft_are_replaced_whole_and_keep_their_ordinals(
 
 
 async def test_an_attempt_is_opened_in_flight_and_closed_once(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
-    view = await view_of(world.uow, campaign_id, stream_id)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    view = await locked_view(world.uow, campaign_id, stream_id)
     desired = (DesiredOffer(offer_id=FREE, share=100, state=OfferState.ACTIVE),)
 
     async with world.uow.begin() as transaction:
@@ -323,12 +294,12 @@ async def _edit_then_fail(
 
 
 async def test_raising_out_of_a_block_loses_its_pins_and_its_drafts(world: FakeWorld) -> None:
-    campaign_id, stream_id = await seeded(world)
-    view = await view_of(world.uow, campaign_id, stream_id)
+    campaign_id, stream_id = await given_mirrored_campaign(world)
+    view = await locked_view(world.uow, campaign_id, stream_id)
 
     with pytest.raises(RuntimeError):
         await _edit_then_fail(world, campaign_id, stream_id, view.mirror_rows)
 
-    reread = await view_of(world.uow, campaign_id, stream_id)
+    reread = await locked_view(world.uow, campaign_id, stream_id)
     assert reread.draft is None
     assert all(row.pinned_share is None for row in reread.mirror_rows)

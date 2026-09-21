@@ -103,6 +103,17 @@ class DraftDiff:
         """Whether PUSH should stay dark. A pin moves no row, so a pin never lights it."""
         return not (self.added or self.removed or self.brought_back or self.share_changes)
 
+    @property
+    def takes_no_traffic(self) -> bool:
+        """Whether the state this would write leaves the flow with nowhere to send a click.
+
+        `share > 0` as well as active: a row pinned at 0 is switched on and still receives
+        nothing, and a flow of nothing but those is a flow that drops every click it is
+        dispatched. The editor refuses to push one rather than discovering it in the
+        statistics tomorrow.
+        """
+        return not any(row.state is OfferState.ACTIVE and row.share > 0 for row in self.desired)
+
 
 def snapshot_hash(rows: Iterable[OfferRow]) -> str:
     """Fingerprint a stream's offer state, to notice it being edited in Keitaro meanwhile.
